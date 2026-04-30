@@ -1,0 +1,14 @@
+services:
+  - type: web
+    name: livechat
+    env: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 3000
+      - key: TENOR_API_KEY
+        value: AIzaSyAyimkuYQYF_FXVALexQf7yGtx84Yygn-0
