@@ -1008,6 +1008,136 @@ const EMO = {
 };
 const QREACTS = ['❤️','😂','😮','😢','😡','👍','👎','🔥','👏','🎉','🤔','😍'];
 
+/* ═══════════════════════════════════════════
+   GIPHY API — MULTI-KEY FALLBACK SYSTEM
+   Keys rotate automatically on failure.
+   Order: primary server route → key 1 → key 2 → key 3
+═══════════════════════════════════════════ */
+const GIPHY_KEYS = [
+  'YdA2bceXfqRYIxMwiEWFO9uwVyOGWe4w',
+  '9vwOD0ckCPs1JvxBbi3fdVkSP7T6A9DG',
+  'E9IBz1C24cwVQMy6XeR0m0X65B89OlPi'
+];
+
+// Tracks which key index is currently active (0 = first key)
+let giphyKeyIndex = 0;
+// Tracks how many consecutive failures on the current key
+let giphyKeyFails = 0;
+const GIPHY_MAX_FAILS = 2; // failures before rotating to the next key
+
+/**
+ * Returns the current active Giphy API key.
+ */
+function getGiphyKey() {
+  return GIPHY_KEYS[giphyKeyIndex];
+}
+
+/**
+ * Rotates to the next API key in the list.
+ * Wraps around to index 0 after the last key.
+ */
+function rotateGiphyKey() {
+  const prev = giphyKeyIndex;
+  giphyKeyIndex = (giphyKeyIndex + 1) % GIPHY_KEYS.length;
+  giphyKeyFails = 0;
+  console.warn(`[GIF] Key #${prev + 1} exhausted — switching to key #${giphyKeyIndex + 1}`);
+}
+
+/**
+ * Builds a Giphy API URL directly (client-side fallback).
+ * Used when the server-side /api/gifs/* route fails.
+ */
+function buildGiphyUrl(type, query) {
+  const key = getGiphyKey();
+  const base = 'https://api.giphy.com/v1/gifs';
+  if (type === 'trending') {
+    return `${base}/trending?api_key=${key}&limit=24&rating=g`;
+  }
+  return `${base}/search?api_key=${key}&q=${encodeURIComponent(query)}&limit=24&rating=g`;
+}
+
+/**
+ * Parses a raw Giphy API response into the same
+ * {url, preview, title} shape the server route returns.
+ */
+function parseGiphyResponse(json) {
+  if (!json || !Array.isArray(json.data)) return [];
+  return json.data.map(g => ({
+    url:     g.images?.original?.url     || g.images?.fixed_height?.url || '',
+    preview: g.images?.fixed_height?.url || g.images?.original?.url     || '',
+    title:   g.title || ''
+  })).filter(g => g.url);
+}
+
+/**
+ * Fetches GIFs with automatic server→direct→key-rotation fallback chain:
+ *
+ *  1. Try  GET /api/gifs/trending  or  /api/gifs/search?q=…   (server route)
+ *  2. If that fails → hit Giphy directly with key #1
+ *  3. If that fails GIPHY_MAX_FAILS times → rotate to key #2, retry
+ *  4. Continue until all keys tried; show error if all exhausted
+ */
+async function fetchGifsWithFallback(query) {
+  const grid = document.getElementById('gif-grid');
+
+  // ── Step 1: try the server-side proxy route first ──
+  try {
+    const serverUrl = query
+      ? `/api/gifs/search?q=${encodeURIComponent(query)}`
+      : '/api/gifs/trending';
+    const res = await fetch(serverUrl);
+    if (!res.ok) throw new Error(`Server route HTTP ${res.status}`);
+    const gifs = await res.json();
+    if (!Array.isArray(gifs)) throw new Error('Unexpected server response');
+    return gifs; // ✅ success via server
+  } catch (serverErr) {
+    console.warn('[GIF] Server route failed:', serverErr.message, '— falling back to direct Giphy API');
+  }
+
+  // ── Step 2: direct Giphy API with key rotation ──
+  const totalKeys = GIPHY_KEYS.length;
+  let attempts = 0;
+
+  while (attempts < totalKeys) {
+    try {
+      const url = buildGiphyUrl(query ? 'search' : 'trending', query);
+      const res = await fetch(url);
+
+      if (!res.ok) {
+        // 429 = rate-limited, 401 = invalid key → rotate immediately
+        const shouldRotate = res.status === 429 || res.status === 401 || res.status === 403;
+        giphyKeyFails++;
+        if (shouldRotate || giphyKeyFails >= GIPHY_MAX_FAILS) {
+          rotateGiphyKey();
+          attempts++;
+        }
+        throw new Error(`Giphy HTTP ${res.status}`);
+      }
+
+      const json = await res.json();
+      const gifs = parseGiphyResponse(json);
+      giphyKeyFails = 0; // reset fail counter on success
+      console.info(`[GIF] Loaded via direct API (key #${giphyKeyIndex + 1})`);
+      return gifs; // ✅ success via direct API
+
+    } catch (err) {
+      console.warn(`[GIF] Key #${giphyKeyIndex + 1} error:`, err.message);
+      // If we haven't rotated yet in this iteration, rotate now
+      if (giphyKeyFails < GIPHY_MAX_FAILS) {
+        giphyKeyFails++;
+      } else {
+        rotateGiphyKey();
+        attempts++;
+      }
+      // Small back-off before retrying with next key
+      await new Promise(r => setTimeout(r, 400));
+    }
+  }
+
+  // ── All keys exhausted ──
+  throw new Error('All Giphy API keys exhausted');
+}
+
 /* ── State ── */
 let socket;
 let myId='', myName='', myRole='user', myColor='#4d7cfe';
@@ -1083,7 +1213,7 @@ function connectSocket() {
     document.getElementById('msgs').innerHTML = '';
     msgs.forEach((m,i) => addMsg(m, false, msgs[i-1]));
     requestAnimationFrame(() => scrollBot(true));
-});
+  });
 
   socket.on('new_message', msg => {
     const prev = messages[messages.length-1];
@@ -1121,8 +1251,8 @@ function connectSocket() {
     const box = document.getElementById('msgs');
     box.innerHTML = '';
     messages.forEach((m,i) => addMsg(m, false, messages[i-1]));
-    requestAnimationFrame(() => scrollBot(true));  // add this
-});
+    requestAnimationFrame(() => scrollBot(true));
+  });
 
   socket.on('chat_settings', ({ slowMode:sm, pinnedMsgId }) => {
     slowMode=sm; pinnedId=pinnedMsgId;
@@ -1333,33 +1463,34 @@ function buildEmoji() {
   show(Object.keys(EMO)[0]);
 }
 
-/* ── GIF picker ── */
+/* ── GIF picker — uses multi-key fallback system ── */
 async function loadGifs(q) {
-  const grid=document.getElementById('gif-grid');
-  grid.innerHTML='<div class="gif-msg">Loading…</div>';
+  const grid = document.getElementById('gif-grid');
+  grid.innerHTML = '<div class="gif-msg">Loading…</div>';
   try {
-    const url=q?`/api/gifs/search?q=${encodeURIComponent(q)}`:'/api/gifs/trending';
-    const res=await fetch(url);
-    if(!res.ok) throw new Error('HTTP '+res.status);
-    const gifs=await res.json();
-    grid.innerHTML='';
-    if(!gifs.length){grid.innerHTML='<div class="gif-msg">No GIFs found</div>';return;}
-    gifs.forEach(g=>{
-      const cell=document.createElement('div');
-      cell.className='gcell';
-      const img=document.createElement('img');
-      img.src=g.preview; img.alt=g.title||'GIF'; img.loading='lazy';
-      img.onerror=()=>cell.remove();
+    const gifs = await fetchGifsWithFallback(q);
+    grid.innerHTML = '';
+    if (!gifs.length) {
+      grid.innerHTML = '<div class="gif-msg">No GIFs found</div>';
+      return;
+    }
+    gifs.forEach(g => {
+      const cell = document.createElement('div');
+      cell.className = 'gcell';
+      const img = document.createElement('img');
+      img.src = g.preview; img.alt = g.title || 'GIF'; img.loading = 'lazy';
+      img.onerror = () => cell.remove();
       cell.appendChild(img);
-      cell.onclick=()=>{
-        if(!socket) return;
-        socket.emit('send_message',{text:g.url,type:'gif',replyToId});
+      cell.onclick = () => {
+        if (!socket) return;
+        socket.emit('send_message', { text: g.url, type: 'gif', replyToId });
         cancelReply(); closePicker('g');
       };
       grid.appendChild(cell);
     });
-  } catch(err) {
-    grid.innerHTML=`<div class="gif-msg" style="color:var(--red)">Failed to load GIFs<br><small>${err.message}</small></div>`;
+  } catch (err) {
+    console.error('[GIF] All sources failed:', err);
+    grid.innerHTML = `<div class="gif-msg" style="color:var(--red)">Failed to load GIFs<br><small>All API keys exhausted. Try again later.</small></div>`;
   }
 }
 
