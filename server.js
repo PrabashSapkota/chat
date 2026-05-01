@@ -19,7 +19,6 @@ const state = {
   polls:         [],   // {id,question,options:[{text,votes:[]}],createdBy,active,ts}
   pinnedMsgId:   null,
   slowMode:      0,
-  chatLocked:    false,
   lastMsgTime:   {},   // userId → timestamp
   maxMessages:   400,
 };
@@ -60,26 +59,12 @@ function broadcastUsers() {
 function broadcastSettings() {
   io.emit('chat_settings', {
     slowMode:   state.slowMode,
-    chatLocked: state.chatLocked,
     pinnedMsgId: state.pinnedMsgId,
   });
 }
 
-/* ── GIF proxy (Tenor & Giphy) ────────────────────────────────────────────── */
-const TENOR_KEY = process.env.TENOR_API_KEY || 'AIzaSyAyimkuYQYF_FXVALexQf7yGtx84Yygn-0';
-const GIPHY_KEY = process.env.GIPHY_API_KEY || 'L8V79mS9bP8N0u2I6L5a4S0E2N1l2E3R'; // Standard public beta key
-
-function mapTenor(results = []) {
-  return results
-    .map(g => ({
-      id:      g.id,
-      preview: g.media_formats?.tinygif?.url || g.media_formats?.gif?.url || '',
-      url:     g.media_formats?.gif?.url     || g.media_formats?.tinygif?.url || '',
-      title:   g.content_description || '',
-      source:  'tenor'
-    }))
-    .filter(g => g.preview && g.url);
-}
+/* ── GIF proxy (Giphy) ────────────────────────────────────────────────────── */
+const GIPHY_KEY = process.env.GIPHY_API_KEY || 'x2NUFYUd98RwHScVZJbOLSBtereb5gZ5';
 
 function mapGiphy(results = []) {
   return (results || [])
@@ -88,38 +73,25 @@ function mapGiphy(results = []) {
       preview: g.images?.fixed_height_small?.url || g.images?.fixed_height?.url || g.images?.preview_gif?.url || '',
       url:     g.images?.original?.url || g.images?.fixed_height?.url || '',
       title:   g.title || '',
-      source:  'giphy'
     }))
     .filter(g => g.preview && g.url);
 }
 
-app.get('/api/gifs/trending', async (req, res) => {
-  const provider = req.query.provider || 'tenor';
+app.get('/api/gifs/trending', async (_req, res) => {
   try {
-    if (provider === 'giphy') {
-      const r = await fetch(`https://api.giphy.com/v1/gifs/trending?api_key=${GIPHY_KEY}&limit=24`);
-      const d = await r.json();
-      return res.json(mapGiphy(d.data));
-    }
-    const r = await fetch(`https://tenor.googleapis.com/v2/featured?key=${TENOR_KEY}&limit=24&media_filter=gif`);
+    const r = await fetch(`https://api.giphy.com/v1/gifs/trending?api_key=${GIPHY_KEY}&limit=24`);
     const d = await r.json();
-    res.json(mapTenor(d.results));
-  } catch (e) { console.error('GIF trending:', e.message); res.json([]); }
+    res.json(mapGiphy(d.data));
+  } catch (e) { console.error('Giphy trending:', e.message); res.json([]); }
 });
 
 app.get('/api/gifs/search', async (req, res) => {
-  const q = encodeURIComponent(req.query.q || 'funny');
-  const provider = req.query.provider || 'tenor';
   try {
-    if (provider === 'giphy') {
-      const r = await fetch(`https://api.giphy.com/v1/gifs/search?api_key=${GIPHY_KEY}&q=${q}&limit=24`);
-      const d = await r.json();
-      return res.json(mapGiphy(d.data));
-    }
-    const r = await fetch(`https://tenor.googleapis.com/v2/search?key=${TENOR_KEY}&q=${q}&limit=24&media_filter=gif`);
+    const q = encodeURIComponent(req.query.q || 'funny');
+    const r = await fetch(`https://api.giphy.com/v1/gifs/search?api_key=${GIPHY_KEY}&q=${q}&limit=24`);
     const d = await r.json();
-    res.json(mapTenor(d.results));
-  } catch (e) { console.error('GIF search:', e.message); res.json([]); }
+    res.json(mapGiphy(d.data));
+  } catch (e) { console.error('Giphy search:', e.message); res.json([]); }
 });
 
 /* ─── Socket.IO ───────────────────────────────────────────────────────────── */
@@ -145,7 +117,6 @@ io.on('connection', socket => {
     const user = state.users[socket.id];
     if (!user) return;
     if (state.bannedIds.has(user.id))                        { socket.emit('banned'); return; }
-    if (state.chatLocked && user.role === 'user')            { socket.emit('error_msg', '🔒 Chat is locked.'); return; }
     if (user.muted)                                          { socket.emit('error_msg', '🔇 You are muted.'); return; }
     if (state.slowMode > 0 && user.role === 'user') {
       const last = state.lastMsgTime[user.id] || 0;
@@ -267,13 +238,6 @@ io.on('connection', socket => {
     const m = sysMsg(state.slowMode > 0 ? `⏱ Slow mode: ${state.slowMode}s` : '⏱ Slow mode off'); push(m); io.emit('new_message', m);
   });
 
-  /* LOCK */
-  socket.on('set_chat_locked', locked => {
-    const user = state.users[socket.id];
-    if (!user || !['admin','mod'].includes(user.role)) return;
-    state.chatLocked = locked; broadcastSettings();
-    const m = sysMsg(locked ? '🔒 Chat locked' : '🔓 Chat unlocked'); push(m); io.emit('new_message', m);
-  });
 
   /* CREATE POLL */
   socket.on('create_poll', ({ question, options }) => {
