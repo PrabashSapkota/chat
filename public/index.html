@@ -1082,8 +1082,8 @@ function connectSocket() {
     messages = msgs;
     document.getElementById('msgs').innerHTML = '';
     msgs.forEach((m,i) => addMsg(m, false, msgs[i-1]));
-    scrollBot(true);
-  });
+    requestAnimationFrame(() => scrollBot(true));
+});
 
   socket.on('new_message', msg => {
     const prev = messages[messages.length-1];
@@ -1121,7 +1121,8 @@ function connectSocket() {
     const box = document.getElementById('msgs');
     box.innerHTML = '';
     messages.forEach((m,i) => addMsg(m, false, messages[i-1]));
-  });
+    requestAnimationFrame(() => scrollBot(true));  // add this
+});
 
   socket.on('chat_settings', ({ slowMode:sm, pinnedMsgId }) => {
     slowMode=sm; pinnedId=pinnedMsgId;
