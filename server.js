@@ -59,35 +59,61 @@ function broadcastSettings() {
   });
 }
 
-/* ─── GIF proxy (Tenor v2) ────────────────────────────────────────────────── */
+/* ── GIF proxy (Tenor & Giphy) ────────────────────────────────────────────── */
 const TENOR_KEY = process.env.TENOR_API_KEY || 'AIzaSyAyimkuYQYF_FXVALexQf7yGtx84Yygn-0';
+const GIPHY_KEY = process.env.GIPHY_API_KEY || 'L8V79mS9bP8N0u2I6L5a4S0E2N1l2E3R'; // Standard public beta key
 
-function mapGifs(results = []) {
+function mapTenor(results = []) {
   return results
     .map(g => ({
       id:      g.id,
       preview: g.media_formats?.tinygif?.url || g.media_formats?.gif?.url || '',
       url:     g.media_formats?.gif?.url     || g.media_formats?.tinygif?.url || '',
       title:   g.content_description || '',
+      source:  'tenor'
     }))
     .filter(g => g.preview && g.url);
 }
 
-app.get('/api/gifs/trending', async (_req, res) => {
+function mapGiphy(results = []) {
+  return results
+    .map(g => ({
+      id:      g.id,
+      preview: g.images?.fixed_height_small?.url || g.images?.fixed_height?.url || '',
+      url:     g.images?.original?.url || '',
+      title:   g.title || '',
+      source:  'giphy'
+    }))
+    .filter(g => g.preview && g.url);
+}
+
+app.get('/api/gifs/trending', async (req, res) => {
+  const provider = req.query.provider || 'tenor';
   try {
+    if (provider === 'giphy') {
+      const r = await fetch(`https://api.giphy.com/v1/gifs/trending?api_key=${GIPHY_KEY}&limit=24`);
+      const d = await r.json();
+      return res.json(mapGiphy(d.data));
+    }
     const r = await fetch(`https://tenor.googleapis.com/v2/featured?key=${TENOR_KEY}&limit=24&media_filter=gif`);
     const d = await r.json();
-    res.json(mapGifs(d.results));
-  } catch (e) { console.error('Tenor trending:', e.message); res.json([]); }
+    res.json(mapTenor(d.results));
+  } catch (e) { console.error('GIF trending:', e.message); res.json([]); }
 });
 
 app.get('/api/gifs/search', async (req, res) => {
+  const q = encodeURIComponent(req.query.q || 'funny');
+  const provider = req.query.provider || 'tenor';
   try {
-    const q = encodeURIComponent(req.query.q || 'funny');
+    if (provider === 'giphy') {
+      const r = await fetch(`https://api.giphy.com/v1/gifs/search?api_key=${GIPHY_KEY}&q=${q}&limit=24`);
+      const d = await r.json();
+      return res.json(mapGiphy(d.data));
+    }
     const r = await fetch(`https://tenor.googleapis.com/v2/search?key=${TENOR_KEY}&q=${q}&limit=24&media_filter=gif`);
     const d = await r.json();
-    res.json(mapGifs(d.results));
-  } catch (e) { console.error('Tenor search:', e.message); res.json([]); }
+    res.json(mapTenor(d.results));
+  } catch (e) { console.error('GIF search:', e.message); res.json([]); }
 });
 
 /* ─── Socket.IO ───────────────────────────────────────────────────────────── */
@@ -110,7 +136,7 @@ io.on('connection', socket => {
   });
 
   /* SEND MESSAGE */
-  socket.on('send_message', ({ text, type }) => {
+  socket.on('send_message', ({ text, type, replyToId }) => {
     const msgType = type || 'text';
     const user = state.users[socket.id];
     if (!user) return;
@@ -133,7 +159,19 @@ io.on('connection', socket => {
     }
 
     const body = msgType === 'text' ? censor(text) : text;
-    const msg  = { id: uuidv4(), userId: user.id, username: user.username, text: body, type: msgType, ts: Date.now(), deleted: false, reactions: {}, color: user.color, role: user.role };
+    const msg  = { 
+      id: uuidv4(), 
+      userId: user.id, 
+      username: user.username, 
+      text: body, 
+      type: msgType, 
+      ts: Date.now(), 
+      deleted: false, 
+      reactions: {}, 
+      color: user.color, 
+      role: user.role,
+      replyTo: replyToId ? state.messages.find(m => m.id === replyToId && !m.deleted) : null
+    };
     state.lastMsgTime[user.id] = Date.now();
     push(msg); io.emit('new_message', msg);
   });
@@ -165,11 +203,12 @@ io.on('connection', socket => {
     if (msg) { msg.deleted = true; io.emit('message_deleted', id); }
   });
 
-  /* PIN MESSAGE */
+  /* PIN / UNPIN MESSAGE */
   socket.on('pin_message', id => {
     const user = state.users[socket.id];
     if (!user || !['admin','mod'].includes(user.role)) return;
-    state.pinnedMsgId = id; broadcastSettings();
+    state.pinnedMsgId = id; // id can be null to unpin
+    broadcastSettings();
   });
 
   /* CLEAR CHAT */
