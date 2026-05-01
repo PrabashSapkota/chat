@@ -15,6 +15,7 @@ app.use(express.json());
 const state = {
   messages:      [],   // {id,userId,username,text,type,ts,deleted,reactions,color,role}
   users:         {},   // socketId → user
+  bannedIds:     new Set(),
   polls:         [],   // {id,question,options:[{text,votes:[]}],createdBy,active,ts}
   pinnedMsgId:   null,
   slowMode:      0,
@@ -98,6 +99,7 @@ io.on('connection', socket => {
 
   /* JOIN */
   socket.on('join', ({ username, userId }) => {
+    if (state.bannedIds.has(userId)) { socket.emit('banned'); socket.disconnect(); return; }
     const prev  = Object.values(state.users).find(u => u.id === userId);
     const color = prev?.color || randColor(userId);
     const role  = prev?.role  || 'user';
@@ -193,6 +195,15 @@ io.on('connection', socket => {
     const m = sysMsg('🗑️ Chat cleared by admin'); push(m); io.emit('new_message', m);
   });
 
+  /* BAN */
+  socket.on('ban_user', targetId => {
+    const user = state.users[socket.id];
+    if (!user || !['admin','mod'].includes(user.role)) return;
+    state.bannedIds.add(targetId);
+    const t = Object.values(state.users).find(u => u.id === targetId);
+    if (t) io.to(t.socketId).emit('banned');
+    broadcastUsers();
+  });
 
   /* MUTE */
   socket.on('mute_user', ({ targetUserId, muted }) => {
@@ -226,11 +237,10 @@ io.on('connection', socket => {
   });
 
 
-  socket.on('delete_all_by_user', targetUserId => {
+  socket.on('unban_user', targetUserId => {
     const user = state.users[socket.id];
-    if (!user || !['admin','mod'].includes(user.role)) return;
-    state.messages.forEach(m => { if (m.userId === targetUserId) m.deleted = true; });
-    io.emit('refresh_chat', state.messages.slice(-100));
+    if (!user || user.role !== 'admin') return;
+    state.bannedIds.delete(targetUserId);
   });
   socket.on('create_poll', ({ question, options }) => {
     const user = state.users[socket.id];
