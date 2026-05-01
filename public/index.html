@@ -42,8 +42,9 @@
 html,body{width:100%;height:100%;overflow:hidden;font-family:var(--f);background:var(--bg);color:var(--text)}
 button{cursor:pointer;border:none;outline:none;font-family:var(--f)}
 input,textarea{font-family:var(--f);outline:none;border:none;background:transparent;color:var(--text)}
-::-webkit-scrollbar{width:3px}
-::-webkit-scrollbar-thumb{background:var(--border2);border-radius:4px}
+::-webkit-scrollbar{width:5px}
+::-webkit-scrollbar-thumb{background:var(--border2);border-radius:10px}
+::-webkit-scrollbar-track{background:transparent}
 
 /* ══════════════════════════════════════
    JOIN SCREEN
@@ -131,6 +132,14 @@ input,textarea{font-family:var(--f);outline:none;border:none;background:transpar
 .hbtn:hover{background:var(--bg4);color:var(--text);border-color:var(--accent)}
 .hbtn.admin{color:var(--admin);border-color:rgba(255,107,53,.35)}
 .hbtn.admin:hover{background:rgba(255,107,53,.1)}
+.hbtn-close{display:none}
+
+@media (max-width: 600px) {
+  #hdr{padding:0 10px;gap:6px}
+  .hdr-name,.hdr-live,.hdr-me{display:none}
+  .hbtn{padding:6px 8px;font-size:12px}
+  .hbtn span{display:none}
+}
 
 /* ── Pinned ── */
 #pinned{
@@ -143,13 +152,21 @@ input,textarea{font-family:var(--f);outline:none;border:none;background:transpar
 #pinned .p-icon{color:var(--accent);font-size:14px}
 #pinned-txt{color:var(--text2);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 
-/* ── Lock banner ── */
-#lock-banner{
-  display:none;text-align:center;padding:7px;flex-shrink:0;
-  font-size:13px;font-weight:500;color:var(--danger);
-  background:rgba(255,71,87,.07);border-bottom:1px solid rgba(255,71,87,.2);
-}
 #lock-banner.on{display:block}
+
+/* ── Reply Preview ── */
+#reply-pre{
+  display:none;align-items:center;gap:10px;
+  padding:8px 14px;background:var(--bg3);
+  border-top:1px solid var(--border);border-left:3px solid var(--accent);
+  flex-shrink:0;animation:fadeUp .2s;
+}
+#reply-pre.on{display:flex}
+.rp-body{flex:1;min-width:0;font-size:12px}
+.rp-name{font-weight:700;color:var(--accent);margin-bottom:2px}
+.rp-text{color:var(--text2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rp-close{background:transparent;color:var(--text3);font-size:16px;padding:4px}
+.rp-close:hover{color:var(--text)}
 
 /* ── Active polls bar ── */
 #polls-bar{display:none;flex-direction:column;border-top:1px solid var(--border);flex-shrink:0;max-height:220px;overflow-y:auto}
@@ -213,6 +230,18 @@ input,textarea{font-family:var(--f);outline:none;border:none;background:transpar
 .mact:hover{background:var(--accent);color:#fff;border-color:var(--accent)}
 .mact.del:hover{background:var(--danger);border-color:var(--danger)}
 .mact.pin:hover{background:var(--accent3);color:#000;border-color:var(--accent3)}
+.mact.rep:hover{background:var(--accent2);border-color:var(--accent2)}
+
+/* Reply ref in message */
+.mreply{
+  margin-bottom:6px;padding:6px 10px;
+  background:rgba(255,255,255,.03);border-left:2px solid var(--accent);
+  border-radius:4px;font-size:12px;cursor:pointer;
+  display:flex;flex-direction:column;gap:2px;
+}
+.mreply:hover{background:rgba(255,255,255,.05)}
+.mr-name{font-weight:700;color:var(--accent)}
+.mr-text{color:var(--text2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 
 /* System msg */
 .msg.sys{justify-content:center;padding:5px;animation:msgIn .18s}
@@ -348,6 +377,13 @@ input,textarea{font-family:var(--f);outline:none;border:none;background:transpar
   border:1px solid var(--border);border-radius:var(--rs);
   color:var(--text);font-size:13px;margin-bottom:9px;
 }
+.gp-tabs{display:flex;gap:4px;margin-bottom:10px}
+.gp-tab{
+  flex:1;padding:6px;background:var(--bg3);border:1px solid var(--border);
+  border-radius:6px;font-size:11px;font-weight:700;color:var(--text2);
+  transition:all .12s;text-transform:uppercase;letter-spacing:.5px;
+}
+.gp-tab.on{background:var(--accent);color:#fff;border-color:var(--accent)}
 #gif-grid{
   display:grid;grid-template-columns:repeat(3,1fr);gap:4px;
   max-height:250px;overflow-y:auto;
@@ -385,6 +421,9 @@ input,textarea{font-family:var(--f);outline:none;border:none;background:transpar
   box-shadow:-8px 0 30px rgba(0,0,0,.4);
 }
 #upanel.on{display:flex}
+@media (max-width: 800px) {
+  #upanel{width:100%;top:0;left:0;border-left:none;z-index:1000}
+}
 .up-hdr{
   padding:14px 14px 8px;
   display:flex;justify-content:space-between;align-items:center;
@@ -585,13 +624,17 @@ input,textarea{font-family:var(--f);outline:none;border:none;background:transpar
     <div class="hdr-gap"></div>
     <div class="hdr-online"><span class="hdr-odot"></span><span id="online-cnt">0 online</span></div>
     <div class="hdr-me"><span class="hdr-me-dot" id="my-dot"></span><span id="my-name-hdr"></span></div>
-    <button class="hbtn" onclick="toggleUsers()">👥 Users</button>
-    <button class="hbtn" id="poll-hbtn" style="display:none" onclick="showPollModal()">📊 Poll</button>
-    <button class="hbtn admin" id="admin-hbtn" style="display:none" onclick="showAdminPanel()">🛡️ Admin</button>
+    <button class="hbtn" onclick="toggleUsers()"><span>👥 </span>Users</button>
+    <button class="hbtn" id="poll-hbtn" style="display:none" onclick="showPollModal()"><span>📊 </span>Poll</button>
+    <button class="hbtn admin" id="admin-hbtn" style="display:none" onclick="showAdminPanel()"><span>🛡️ </span>Admin</button>
   </div>
 
   <!-- Pinned -->
-  <div id="pinned"><span class="p-icon">📌</span><span id="pinned-txt"></span></div>
+  <div id="pinned">
+    <span class="p-icon">📌</span>
+    <span id="pinned-txt"></span>
+    <button class="hbtn" style="padding:2px 8px;font-size:10px;margin-left:8px" onclick="pinMsg(null)">Unpin</button>
+  </div>
   <!-- Lock -->
   <div id="lock-banner">🔒 Chat is locked — only moderators can send messages</div>
   <!-- Polls -->
@@ -602,6 +645,15 @@ input,textarea{font-family:var(--f);outline:none;border:none;background:transpar
   <div id="typing"></div>
   <!-- Jump -->
   <button id="jump" onclick="scrollBot(true)">↓</button>
+
+  <!-- Reply Preview -->
+  <div id="reply-pre">
+    <div class="rp-body">
+      <div class="rp-name" id="rp-name"></div>
+      <div class="rp-text" id="rp-text"></div>
+    </div>
+    <button class="rp-close" onclick="cancelReply()">✕</button>
+  </div>
 
   <!-- Input -->
   <div id="input-wrap">
@@ -631,9 +683,13 @@ input,textarea{font-family:var(--f);outline:none;border:none;background:transpar
 
 <!-- ════════════════ GIF PICKER ════════════════ -->
 <div id="gpicker">
+  <div class="gp-tabs">
+    <button class="gp-tab on" id="gt-tenor" onclick="setGifProv('tenor')">Tenor</button>
+    <button class="gp-tab" id="gt-giphy" onclick="setGifProv('giphy')">Giphy</button>
+  </div>
   <input class="gp-srch" id="gp-srch" placeholder="🔍 Search GIFs…" autocomplete="off"/>
   <div id="gif-grid"><div class="gif-msg">Loading trending GIFs…</div></div>
-  <div class="gp-footer">Powered by Tenor</div>
+  <div class="gp-footer">Powered by Tenor & Giphy</div>
 </div>
 
 <!-- React menu -->
@@ -726,7 +782,8 @@ let users=[], polls=[], messages=[];
 let slowMode=0, chatLocked=false, pinnedId=null;
 let atBottom=true;
 let curEpCat='😊';
-let gifTimer;
+let gifTimer, gifProv='tenor';
+let replyToId=null;
 
 /* ══════════════════════════════════════
    BOOT — Auto-login if name stored
@@ -913,6 +970,16 @@ function addMsg(msg, animate) {
   div.className = `msg${msg.type === 'whisper' ? ' wsp' : ''}`;
   if (!animate) div.style.animation = 'none';
 
+  let replyHtml = '';
+  if (msg.replyTo) {
+    const r = msg.replyTo;
+    replyHtml = `
+      <div class="mreply" onclick="scrollToMsg('${r.id}')">
+        <div class="mr-name">${esc(r.username)}</div>
+        <div class="mr-text">${r.type==='gif' ? '🎬 GIF' : esc(r.text)}</div>
+      </div>`;
+  }
+
   const init  = (msg.username || '?')[0].toUpperCase();
   const col   = msg.color || '#7c6eff';
   const ts    = new Date(msg.ts).toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' });
@@ -931,6 +998,7 @@ function addMsg(msg, animate) {
   const canMod = ['admin','mod'].includes(myRole);
   const acts = !msg.deleted ? `
     <div class="macts">
+      <button class="mact rep" onclick="doReply('${msg.id}')">↩️</button>
       <button class="mact" onclick="openRMenu('${msg.id}',event)">😊</button>
       ${canMod ? `<button class="mact pin" onclick="pinMsg('${msg.id}')">📌</button>` : ''}
       ${canMod ? `<button class="mact del" onclick="socket.emit('delete_message','${msg.id}')">🗑</button>` : ''}
@@ -939,6 +1007,7 @@ function addMsg(msg, animate) {
   div.innerHTML = `
     <div class="mavt" style="background:${col}20;color:${col}">${init}</div>
     <div class="mbody">
+      ${replyHtml}
       <div class="mmeta">
         <span class="mname" style="color:${col}" onclick="openCtxByUid('${esc(msg.userId)}',event)">${esc(msg.username)}</span>
         ${badge}
@@ -1011,7 +1080,8 @@ function sendMsg() {
   const inp  = document.getElementById('inp');
   const text = inp.value.trim();
   if (!text || !socket) return;
-  socket.emit('send_message', { text, type: 'text' });
+  socket.emit('send_message', { text, type: 'text', replyToId });
+  cancelReply();
   inp.value = '';
   inp.style.height = 'auto';
   document.getElementById('ccount').textContent = '0 / 1000';
@@ -1089,7 +1159,7 @@ async function loadGifs(q) {
   const grid = document.getElementById('gif-grid');
   grid.innerHTML = '<div class="gif-msg">Loading…</div>';
   try {
-    const url = q ? `/api/gifs/search?q=${encodeURIComponent(q)}` : '/api/gifs/trending';
+    const url = q ? `/api/gifs/search?provider=${gifProv}&q=${encodeURIComponent(q)}` : `/api/gifs/trending?provider=${gifProv}`;
     const res = await fetch(url);
     if (!res.ok) throw new Error('HTTP ' + res.status);
     const gifs = await res.json();
@@ -1104,7 +1174,8 @@ async function loadGifs(q) {
       cell.appendChild(img);
       cell.onclick = () => {
         if (!socket) return;
-        socket.emit('send_message', { text: g.url, type: 'gif' });
+        socket.emit('send_message', { text: g.url, type: 'gif', replyToId });
+        cancelReply();
         closePicker('g');
       };
       grid.appendChild(cell);
@@ -1145,6 +1216,37 @@ function outsideClick(e) {
   if (!e.target.closest('#gpicker') && !e.target.closest('#g-tbtn')) closePicker('g');
   if (!e.target.closest('#rmenu')   && !e.target.closest('.mact'))   closeRMenu();
   if (!e.target.closest('#ctx')     && !e.target.closest('.mname') && !e.target.closest('.urow')) closeCtx();
+}
+
+function setGifProv(p) {
+  gifProv = p;
+  document.getElementById('gt-tenor').classList.toggle('on', p==='tenor');
+  document.getElementById('gt-giphy').classList.toggle('on', p==='giphy');
+  loadGifs(document.getElementById('gp-srch').value.trim());
+}
+
+function doReply(id) {
+  const m = messages.find(m => m.id === id);
+  if (!m) return;
+  replyToId = id;
+  document.getElementById('rp-name').textContent = m.username;
+  document.getElementById('rp-text').textContent = m.type==='gif'?'🎬 GIF':m.text;
+  document.getElementById('reply-pre').classList.add('on');
+  document.getElementById('inp').focus();
+}
+
+function cancelReply() {
+  replyToId = null;
+  document.getElementById('reply-pre').classList.remove('on');
+}
+
+function scrollToMsg(id) {
+  const el = document.querySelector(`[data-mid="${id}"]`);
+  if (el) {
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    el.style.background = 'var(--bg4)';
+    setTimeout(() => el.style.background = '', 2000);
+  }
 }
 
 /* ══════════════════════════════════════
@@ -1303,8 +1405,11 @@ function updatePinned() {
   const bar = document.getElementById('pinned');
   if (!pinnedId) { bar.classList.remove('on'); return; }
   const m = messages.find(m => m.id === pinnedId);
+  const canMod = ['admin','mod'].includes(myRole);
   if (m && !m.deleted) {
-    document.getElementById('pinned-txt').textContent = (m.type === 'gif' ? '📷 GIF' : m.text).slice(0, 100);
+    document.getElementById('pinned-txt').textContent = (m.type === 'gif' ? '🎬 GIF' : m.text).slice(0, 100);
+    const unpinBtn = bar.querySelector('button');
+    if (unpinBtn) unpinBtn.style.display = canMod ? 'block' : 'none';
     bar.classList.add('on');
   } else { bar.classList.remove('on'); }
 }
@@ -1342,6 +1447,7 @@ function updatePrivUI() {
   const priv = ['admin','mod'].includes(myRole);
   document.getElementById('admin-hbtn').style.display = myRole === 'admin' ? '' : 'none';
   document.getElementById('poll-hbtn').style.display  = priv ? '' : 'none';
+  updatePinned();
 }
 function setMyDot(c) { const d = document.getElementById('my-dot'); if (d) d.style.background = c; }
 
