@@ -390,18 +390,18 @@ input,textarea{font-family:var(--f);outline:none;border:none;background:transpar
   color:var(--text);font-size:13px;margin-bottom:9px;
 }
 #gif-grid{
-  display:grid;grid-template-columns:repeat(2,1fr);gap:8px;
-  max-height:300px;overflow-y:auto;
-  padding:2px;
+  display:grid;grid-template-columns:1fr 1fr;gap:10px;
+  max-height:350px;overflow-y:auto;
+  padding:4px;
 }
 .gcell{
-  border-radius:10px;overflow:hidden;cursor:pointer;
-  aspect-ratio:1.5;background:var(--bg3);position:relative;
-  border:1px solid var(--border);transition:transform .15s;
+  height:120px;border-radius:10px;overflow:hidden;
+  cursor:pointer;background:var(--bg3);
+  border:1px solid var(--border);transition:all .15s;
+  position:relative;
 }
-.gcell:hover{transform:scale(1.02);border-color:var(--accent)}
+.gcell:hover{transform:translateY(-2px);border-color:var(--accent);box-shadow:0 4px 12px rgba(0,0,0,.3)}
 .gcell img{width:100%;height:100%;object-fit:cover;display:block}
-.gcell:hover{outline:2px solid var(--accent)}
 .gif-msg{text-align:center;padding:18px;color:var(--text2);font-size:13px;grid-column:1/-1}
 .gp-footer{font-size:10px;color:var(--text3);text-align:right;margin-top:6px}
 
