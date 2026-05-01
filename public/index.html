@@ -1078,20 +1078,19 @@ function connectSocket() {
     notify(msgs[role]||'Role updated', 'ok');
   });
 
- socket.on('chat_history', msgs => {
+  socket.on('chat_history', msgs => {
     messages = msgs;
     document.getElementById('msgs').innerHTML = '';
     msgs.forEach((m,i) => addMsg(m, false, msgs[i-1]));
-    scrollBot(true);  // already calls double-rAF now
+    requestAnimationFrame(() => scrollBot(true));
 });
-   
+
   socket.on('new_message', msg => {
     const prev = messages[messages.length-1];
     messages.push(msg);
     if (messages.length > 500) messages.shift();
     addMsg(msg, true, prev);
-    scrollBot(true);  // add this — scrolls regardless of position
-});
+  });
 
   socket.on('message_deleted', id => {
     const el = document.querySelector(`[data-mid="${id}"]`);
@@ -1117,12 +1116,12 @@ function connectSocket() {
 
   socket.on('polls_update', list => { polls=list; renderPolls(); });
 
- socket.on('refresh_chat', history => {
+  socket.on('refresh_chat', history => {
     messages = history;
     const box = document.getElementById('msgs');
     box.innerHTML = '';
     messages.forEach((m,i) => addMsg(m, false, messages[i-1]));
-    scrollBot(true);  // add this line
+    requestAnimationFrame(() => scrollBot(true));  // add this
 });
 
   socket.on('chat_settings', ({ slowMode:sm, pinnedMsgId }) => {
@@ -1171,7 +1170,7 @@ function addMsg(msg, animate, prev) {
     if(!animate) div.style.animation='none';
     div.innerHTML=`<div class="sys-pill">${esc(msg.text)}</div>`;
     box.appendChild(div);
-    if(animate) scrollBot(true);
+    if(animate&&atBottom) scrollBot(); else if(animate) showJump();
     return;
   }
 
@@ -1237,7 +1236,7 @@ function addMsg(msg, animate, prev) {
   box.appendChild(div);
   if(msg.reactions&&Object.keys(msg.reactions).length)
     renderReacts(div.querySelector('.mreacts'), msg.id, msg.reactions);
-  if(animate) scrollBot(true);
+  if(animate&&atBottom) scrollBot(); else if(animate) showJump();
 }
 
 function renderReacts(el, mid, reactions) {
@@ -1570,15 +1569,12 @@ function setupScroll(){
     atBottom=box.scrollHeight-box.scrollTop-box.clientHeight<80;
     document.getElementById('jump').classList.toggle('on',!atBottom);
   });
-function scrollBot(force){
-  const box=document.getElementById('msgs');
-  requestAnimationFrame(() => {
-    requestAnimationFrame(() => {
-      box.scrollTop=box.scrollHeight;
-      if(force) document.getElementById('jump').classList.remove('on');
-    });
-  });
 }
+function scrollBot(force){
+  const box=document.getElementById('msgs'); box.scrollTop=box.scrollHeight;
+  if(force) document.getElementById('jump').classList.remove('on');
+}
+function showJump(){document.getElementById('jump').classList.add('on');}
 
 /* ── Notifications ── */
 const NICONS={err:'⚠',ok:'✓',warn:'⚠',info:'·'};
