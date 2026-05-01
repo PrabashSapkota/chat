@@ -176,8 +176,8 @@ input,textarea{font-family:var(--f);outline:none;border:none;background:transpar
 /* ── Messages ── */
 #msgs{
   flex:1;overflow-y:auto;
-  padding:20px 20px 10px;
-  display:flex;flex-direction:column;gap:4px;
+  padding:16px 16px 20px;
+  display:flex;flex-direction:column;gap:12px;
 }
 
 /* Message row */
@@ -207,16 +207,15 @@ input,textarea{font-family:var(--f);outline:none;border:none;background:transpar
 .mtext{font-size:14px;line-height:1.6;word-break:break-word}
 .mtext.del{color:var(--text3);font-style:italic}
 .mgif{
-  margin-top:8px;max-width:min(100%, 320px);
-  border-radius:12px;overflow:hidden;
+  margin-top:6px;max-width:200px;
+  border-radius:10px;overflow:hidden;
   border:1px solid var(--border2);
   background:var(--bg3);
-  box-shadow:0 4px 12px rgba(0,0,0,.2);
 }
 .mgif img{
-  width:100%;height:auto;max-height:400px;
+  width:100%;height:auto;max-height:180px;
   display:block;cursor:zoom-in;
-  object-fit:contain;
+  object-fit:cover;
 }
 .mreacts{display:flex;flex-wrap:wrap;gap:3px;margin-top:4px}
 .rchip{
