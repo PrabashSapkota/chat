@@ -11,7 +11,7 @@
    VARIABLES
 ══════════════════════════════════════ */
 :root {
-  --bg:       #0d1117;
+  --bg:       #161b22;
   --bg2:      #0b0d14;
   --bg3:      #181c2e;
   --bg4:      #1e2338;
@@ -734,6 +734,7 @@ input,textarea{font-family:var(--f);outline:none;border:none;background:transpar
     <div class="ap-sec">Chat Controls</div>
     <div class="ap-grid">
       <button class="abtn ab-r" onclick="clearChat()">🗑️ Clear Chat</button>
+      <button class="abtn ab-o" onclick="doUnbanPrompt()">🔨 Unban User</button>
       <button class="abtn ab-g" onclick="showPollModal();hideAdminPanel()">📊 Create Poll</button>
       <button class="abtn ab-p" onclick="exportChat()">📥 Export Chat</button>
     </div>
@@ -909,13 +910,6 @@ function connectSocket() {
 
   socket.on('polls_update', list => { polls = list; renderPolls(); });
 
-  socket.on('refresh_chat', history => {
-    messages = history;
-    const box = document.getElementById('msgs');
-    box.innerHTML = '';
-    messages.forEach(m => addMsg(m, false));
-  });
-
   socket.on('chat_settings', ({ slowMode: sm, pinnedMsgId }) => {
     slowMode = sm; pinnedId = pinnedMsgId;
     document.getElementById('slow-tag').classList.toggle('on', sm > 0);
@@ -994,9 +988,7 @@ function addMsg(msg, animate) {
   } else if (msg.type === 'gif') {
     content = `<div class="mgif"><img src="${esc(msg.text)}" alt="GIF" loading="lazy" onerror="this.parentNode.innerHTML='❌ GIF failed to load'"/></div>`;
   } else {
-    let pre = '';
-    if (msg.replyTo) pre = `<span style="color:var(--accent);font-weight:700;margin-right:4px">@${esc(msg.replyTo.username)}</span> `;
-    content = `<span class="mtext">${pre}${fmt(esc(msg.text))}</span>`;
+    content = `<span class="mtext">${fmt(esc(msg.text))}</span>`;
   }
 
   const canMod = ['admin','mod'].includes(myRole);
@@ -1005,11 +997,13 @@ function addMsg(msg, animate) {
       <button class="mact rep" onclick="doReply('${msg.id}')" title="Reply">↩️</button>
       <button class="mact" onclick="openRMenu('${msg.id}',event)" title="React">😊</button>
       ${canMod ? `<button class="mact pin" onclick="pinMsg('${msg.id}')" title="Pin">📌</button>` : ''}
+      ${(canMod || msg.userId === myId) ? `<button class="mact del" onclick="delMsg('${msg.id}')" title="Delete">🗑️</button>` : ''}
     </div>` : '';
 
   div.innerHTML = `
     <div class="mavt" style="background:${col}">${init}</div>
     <div class="mbody">
+      ${replyHtml}
       <div class="mmeta">
         <span class="mname" style="color:${col}" onclick="openCtxByUid('${esc(msg.userId)}',event)">${esc(msg.username)}</span>
         ${badge}
@@ -1026,6 +1020,7 @@ function addMsg(msg, animate) {
 
   if (animate && atBottom) scrollBot();
   else if (animate) showJump();
+  if (animate && msg.userId !== myId && msg.type !== 'system') ping();
 }
 
 function renderReacts(el, mid, reactions) {
@@ -1316,7 +1311,7 @@ function openCtxByUid(uid, evt) {
   if (canMod) {
     html += `<div class="cdiv"></div>`;
     html += `<div class="ci warn" onclick="socket.emit('mute_user',{targetUserId:'${uid}',muted:${!u.muted}});closeCtx()">${u.muted ? '🔊 Unmute' : '🔇 Mute'}</div>`;
-    html += `<div class="ci danger" onclick="doDeleteAll('${uid}','${esc(u.username)}')">🗑️ Delete All Messages</div>`;
+    html += `<div class="ci danger" onclick="doBan('${uid}','${esc(u.username)}')">🔨 Ban User</div>`;
   }
   if (myRole === 'admin') {
     html += `<div class="cdiv"></div>`;
@@ -1338,9 +1333,9 @@ function doWhisper(uid) {
   const t = prompt(`Whisper to ${u?.username || uid}:`);
   if (t?.trim()) socket.emit('whisper', { targetUserId: uid, text: t.trim() });
 }
-function doDeleteAll(uid, name) {
+function doBan(uid, name) {
   closeCtx();
-  if (confirm(`Delete ALL messages by ${name}?`)) socket.emit('delete_all_by_user', uid);
+  if (confirm(`Ban ${name}?`)) socket.emit('ban_user', uid);
 }
 
 /* ══════════════════════════════════════
