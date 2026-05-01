@@ -11,8 +11,8 @@
    VARIABLES
 ══════════════════════════════════════ */
 :root {
-  --bg:       #0b0d14;
-  --bg2:      #11141f;
+  --bg:       #161b22;
+  --bg2:      #0b0d14;
   --bg3:      #181c2e;
   --bg4:      #1e2338;
   --bg5:      #252b42;
@@ -183,14 +183,12 @@ input,textarea{font-family:var(--f);outline:none;border:none;background:transpar
 /* Message row */
 .msg{
   display:flex;align-items:flex-start;gap:12px;
-  padding:10px 12px;border-radius:12px;
+  padding:8px 12px;border-radius:12px;
   position:relative;transition:all .15s;
   animation:msgIn .2s cubic-bezier(.16,1,.3,1);
-  margin-bottom:6px;
-  background:rgba(255,255,255,.03);
-  border:1px solid rgba(255,255,255,.02);
+  margin-bottom:2px;
 }
-.msg:hover{background:rgba(255,255,255,.07);border-color:rgba(255,255,255,.05)}
+.msg:hover{background:rgba(255,255,255,.03)}
 .msg:hover .macts{opacity:1;pointer-events:auto}
 
 .mavt{
@@ -211,13 +209,13 @@ input,textarea{font-family:var(--f);outline:none;border:none;background:transpar
 .mtext{font-size:14px;line-height:1.6;word-break:break-word}
 .mtext.del{color:var(--text3);font-style:italic}
 .mgif{
-  margin-top:6px;max-width:150px;
+  margin-top:6px;max-width:120px;
   border-radius:10px;overflow:hidden;
   border:1px solid var(--border2);
   background:var(--bg3);
 }
 .mgif img{
-  width:100%;height:auto;max-height:140px;
+  width:100%;height:auto;max-height:110px;
   display:block;cursor:zoom-in;
   object-fit:cover;
 }
@@ -736,6 +734,7 @@ input,textarea{font-family:var(--f);outline:none;border:none;background:transpar
     <div class="ap-sec">Chat Controls</div>
     <div class="ap-grid">
       <button class="abtn ab-r" onclick="clearChat()">🗑️ Clear Chat</button>
+      <button class="abtn ab-o" onclick="doUnbanPrompt()">🔨 Unban User</button>
       <button class="abtn ab-g" onclick="showPollModal();hideAdminPanel()">📊 Create Poll</button>
       <button class="abtn ab-p" onclick="exportChat()">📥 Export Chat</button>
     </div>
@@ -995,14 +994,14 @@ function addMsg(msg, animate) {
   const canMod = ['admin','mod'].includes(myRole);
   const acts = !msg.deleted ? `
     <div class="macts">
-      <button class="mact rep" onclick="doReply('${msg.id}')">↩️</button>
-      <button class="mact" onclick="openRMenu('${msg.id}',event)">😊</button>
-      ${canMod ? `<button class="mact pin" onclick="pinMsg('${msg.id}')">📌</button>` : ''}
-      ${canMod ? `<button class="mact del" onclick="socket.emit('delete_message','${msg.id}')">🗑</button>` : ''}
+      <button class="mact rep" onclick="doReply('${msg.id}')" title="Reply">↩️</button>
+      <button class="mact" onclick="openRMenu('${msg.id}',event)" title="React">😊</button>
+      ${canMod ? `<button class="mact pin" onclick="pinMsg('${msg.id}')" title="Pin">📌</button>` : ''}
+      ${(canMod || msg.userId === myId) ? `<button class="mact del" onclick="delMsg('${msg.id}')" title="Delete">🗑️</button>` : ''}
     </div>` : '';
 
   div.innerHTML = `
-    <div class="mavt" style="background:${col}20;color:${col}">${init}</div>
+    <div class="mavt" style="background:${col}">${init}</div>
     <div class="mbody">
       ${replyHtml}
       <div class="mmeta">
@@ -1428,6 +1427,11 @@ function hideAdminPanel() { document.getElementById('admin-panel').classList.rem
 function clearChat() {
   if (!confirm('Clear ALL messages? Cannot be undone.')) return;
   socket.emit('clear_chat'); hideAdminPanel();
+}
+
+function doUnbanPrompt() {
+  const id = prompt('Enter User ID to unban:');
+  if (id) { socket.emit('unban_user', id.trim()); notify('Unban request sent', 'ok'); }
 }
 
 function applySlowMode() {
