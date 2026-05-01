@@ -378,13 +378,6 @@ input,textarea{font-family:var(--f);outline:none;border:none;background:transpar
   border:1px solid var(--border);border-radius:var(--rs);
   color:var(--text);font-size:13px;margin-bottom:9px;
 }
-.gp-tabs{display:flex;gap:4px;margin-bottom:10px}
-.gp-tab{
-  flex:1;padding:6px;background:var(--bg3);border:1px solid var(--border);
-  border-radius:6px;font-size:11px;font-weight:700;color:var(--text2);
-  transition:all .12s;text-transform:uppercase;letter-spacing:.5px;
-}
-.gp-tab.on{background:var(--accent);color:#fff;border-color:var(--accent)}
 #gif-grid{
   display:grid;grid-template-columns:repeat(3,1fr);gap:4px;
   max-height:250px;overflow-y:auto;
@@ -637,8 +630,6 @@ input,textarea{font-family:var(--f);outline:none;border:none;background:transpar
     <span id="pinned-txt"></span>
     <button class="hbtn" style="padding:2px 8px;font-size:10px;margin-left:8px" onclick="pinMsg(null)">Unpin</button>
   </div>
-  <!-- Lock -->
-  <div id="lock-banner">🔒 Chat is locked — only moderators can send messages</div>
   <!-- Polls -->
   <div id="polls-bar"></div>
   <!-- Messages -->
@@ -664,7 +655,6 @@ input,textarea{font-family:var(--f);outline:none;border:none;background:transpar
       <button class="tbtn" id="g-tbtn" onclick="togglePicker('g')" title="GIFs" style="font-size:11px;font-weight:800;padding:5px 8px">GIF</button>
       <div class="i-gap"></div>
       <span class="slow-tag" id="slow-tag">⏱ Slow mode</span>
-      <span class="lock-tag" id="lock-tag">🔒 Locked</span>
     </div>
     <div class="irow">
       <textarea id="inp" placeholder="Message… (Enter = send, Shift+Enter = new line)" rows="1" maxlength="1000"></textarea>
@@ -683,13 +673,9 @@ input,textarea{font-family:var(--f);outline:none;border:none;background:transpar
 
 <!-- ════════════════ GIF PICKER ════════════════ -->
 <div id="gpicker">
-  <div class="gp-tabs">
-    <button class="gp-tab on" id="gt-tenor" onclick="setGifProv('tenor')">Tenor</button>
-    <button class="gp-tab" id="gt-giphy" onclick="setGifProv('giphy')">Giphy</button>
-  </div>
-  <input class="gp-srch" id="gp-srch" placeholder="🔍 Search GIFs…" autocomplete="off"/>
+  <input class="gp-srch" id="gp-srch" placeholder="🔍 Search Giphy…" autocomplete="off"/>
   <div id="gif-grid"><div class="gif-msg">Loading trending GIFs…</div></div>
-  <div class="gp-footer">Powered by Tenor & Giphy</div>
+  <div class="gp-footer">Powered by Giphy</div>
 </div>
 
 <!-- React menu -->
@@ -732,7 +718,6 @@ input,textarea{font-family:var(--f);outline:none;border:none;background:transpar
     <div class="ap-sec">Chat Controls</div>
     <div class="ap-grid">
       <button class="abtn ab-r" onclick="clearChat()">🗑️ Clear Chat</button>
-      <button class="abtn ab-o" id="lock-ap" onclick="toggleLock()">🔒 Lock Chat</button>
       <button class="abtn ab-g" onclick="showPollModal();hideAdminPanel()">📊 Create Poll</button>
       <button class="abtn ab-p" onclick="exportChat()">📥 Export Chat</button>
     </div>
@@ -782,7 +767,7 @@ let users=[], polls=[], messages=[];
 let slowMode=0, chatLocked=false, pinnedId=null;
 let atBottom=true;
 let curEpCat='😊';
-let gifTimer, gifProv='tenor';
+let gifTimer;
 let replyToId=null;
 
 /* ══════════════════════════════════════
@@ -908,17 +893,11 @@ function connectSocket() {
 
   socket.on('polls_update', list => { polls = list; renderPolls(); });
 
-  socket.on('chat_settings', ({ slowMode: sm, chatLocked: cl, pinnedMsgId }) => {
-    slowMode = sm; chatLocked = cl; pinnedId = pinnedMsgId;
-    const locked = cl && myRole === 'user';
-    document.getElementById('lock-banner').classList.toggle('on', locked);
-    document.getElementById('lock-tag').classList.toggle('on', locked);
+  socket.on('chat_settings', ({ slowMode: sm, pinnedMsgId }) => {
+    slowMode = sm; pinnedId = pinnedMsgId;
     document.getElementById('slow-tag').classList.toggle('on', sm > 0);
     if (sm > 0) document.getElementById('slow-tag').textContent = `⏱ ${sm}s`;
-    document.getElementById('inp').disabled      = locked;
-    document.getElementById('send-btn').disabled = locked;
-    document.getElementById('slow-inp').value    = sm;
-    document.getElementById('lock-ap').textContent = cl ? '🔓 Unlock Chat' : '🔒 Lock Chat';
+    document.getElementById('slow-inp').value = sm;
     updatePinned();
   });
 
@@ -1157,7 +1136,7 @@ async function loadGifs(q) {
   const grid = document.getElementById('gif-grid');
   grid.innerHTML = '<div class="gif-msg">Loading…</div>';
   try {
-    const url = q ? `/api/gifs/search?provider=${gifProv}&q=${encodeURIComponent(q)}` : `/api/gifs/trending?provider=${gifProv}`;
+    const url = q ? `/api/gifs/search?q=${encodeURIComponent(q)}` : '/api/gifs/trending';
     const res = await fetch(url);
     if (!res.ok) throw new Error('HTTP ' + res.status);
     const gifs = await res.json();
@@ -1216,12 +1195,6 @@ function outsideClick(e) {
   if (!e.target.closest('#ctx')     && !e.target.closest('.mname') && !e.target.closest('.urow')) closeCtx();
 }
 
-function setGifProv(p) {
-  gifProv = p;
-  document.getElementById('gt-tenor').classList.toggle('on', p==='tenor');
-  document.getElementById('gt-giphy').classList.toggle('on', p==='giphy');
-  loadGifs(document.getElementById('gp-srch').value.trim());
-}
 
 function doReply(id) {
   const m = messages.find(m => m.id === id);
@@ -1431,7 +1404,6 @@ function clearChat() {
   if (!confirm('Clear ALL messages? Cannot be undone.')) return;
   socket.emit('clear_chat'); hideAdminPanel();
 }
-function toggleLock() { socket.emit('set_chat_locked', !chatLocked); }
 
 function applySlowMode() {
   const v = parseInt(document.getElementById('slow-inp').value) || 0;
