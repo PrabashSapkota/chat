@@ -183,12 +183,14 @@ input,textarea{font-family:var(--f);outline:none;border:none;background:transpar
 /* Message row */
 .msg{
   display:flex;align-items:flex-start;gap:12px;
-  padding:8px 10px;border-radius:12px;
-  position:relative;transition:background .12s;
+  padding:10px 12px;border-radius:12px;
+  position:relative;transition:all .15s;
   animation:msgIn .2s cubic-bezier(.16,1,.3,1);
-  margin-bottom:2px;
+  margin-bottom:6px;
+  background:rgba(255,255,255,.03);
+  border:1px solid rgba(255,255,255,.02);
 }
-.msg:hover{background:var(--bg2)}
+.msg:hover{background:rgba(255,255,255,.07);border-color:rgba(255,255,255,.05)}
 .msg:hover .macts{opacity:1;pointer-events:auto}
 
 .mavt{
@@ -671,7 +673,7 @@ input,textarea{font-family:var(--f);outline:none;border:none;background:transpar
       <span class="slow-tag" id="slow-tag">⏱ Slow mode</span>
     </div>
     <div class="irow">
-      <textarea id="inp" placeholder="Type here" rows="1" maxlength="1000"></textarea>
+      <textarea id="inp" placeholder="Message… (Enter = send, Shift+Enter = new line)" rows="1" maxlength="1000"></textarea>
       <button id="send-btn">Send ↗</button>
     </div>
     <div class="ifooter"><span id="ccount">0 / 1000</span></div>
@@ -1071,6 +1073,13 @@ function sendMsg() {
   const inp  = document.getElementById('inp');
   const text = inp.value.trim();
   if (!text || !socket) return;
+
+  // Restrict links to Admins/Mods
+  const urlRegex = /(https?:\/\/[^\s<"]+)/i;
+  if (urlRegex.test(text) && !['admin','mod'].includes(myRole)) {
+    return notify('🚫 Only moderators can send links', 'err');
+  }
+
   socket.emit('send_message', { text, type: 'text', replyToId });
   cancelReply();
   inp.value = '';
