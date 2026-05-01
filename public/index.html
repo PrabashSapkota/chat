@@ -132,6 +132,7 @@ input,textarea{font-family:var(--f);outline:none;border:none;background:transpar
 .hbtn:hover{background:var(--bg4);color:var(--text);border-color:var(--accent)}
 .hbtn.admin{color:var(--admin);border-color:rgba(255,107,53,.35)}
 .hbtn.admin:hover{background:rgba(255,107,53,.1)}
+.hbtn.logout:hover{background:rgba(255,71,87,.1);color:var(--danger);border-color:rgba(255,71,87,.3)}
 .hbtn-close{display:none}
 
 @media (max-width: 600px) {
@@ -624,6 +625,7 @@ input,textarea{font-family:var(--f);outline:none;border:none;background:transpar
     <div class="hdr-gap"></div>
     <div class="hdr-online"><span class="hdr-odot"></span><span id="online-cnt">0 online</span></div>
     <div class="hdr-me"><span class="hdr-me-dot" id="my-dot"></span><span id="my-name-hdr"></span></div>
+    <button class="hbtn logout" onclick="doLogout()" title="Logout/Change Name">🚪 Logout</button>
     <button class="hbtn" onclick="toggleUsers()"><span>👥 </span>Users</button>
     <button class="hbtn" id="poll-hbtn" style="display:none" onclick="showPollModal()"><span>📊 </span>Poll</button>
     <button class="hbtn admin" id="admin-hbtn" style="display:none" onclick="showAdminPanel()"><span>🛡️ </span>Admin</button>
@@ -636,7 +638,7 @@ input,textarea{font-family:var(--f);outline:none;border:none;background:transpar
     <button class="hbtn" style="padding:2px 8px;font-size:10px;margin-left:8px" onclick="pinMsg(null)">Unpin</button>
   </div>
   <!-- Lock -->
-  <div id="lock-banner"></div>
+  <div id="lock-banner">🔒 Chat is locked — only moderators can send messages</div>
   <!-- Polls -->
   <div id="polls-bar"></div>
   <!-- Messages -->
@@ -659,9 +661,7 @@ input,textarea{font-family:var(--f);outline:none;border:none;background:transpar
   <div id="input-wrap">
     <div class="itools">
       <button class="tbtn" id="e-tbtn" onclick="togglePicker('e')" title="Emoji">😊</button>
-      <button class="tbtn" id="g-tbtn" onclick="togglePicker('g')" title="GIFs">🎬</button>
-      <button class="tbtn" onclick="wrapSel('**','**')" title="Bold"><b>B</b></button>
-      <button class="tbtn" onclick="wrapSel('*','*')" title="Italic" style="font-style:italic">I</button>
+      <button class="tbtn" id="g-tbtn" onclick="togglePicker('g')" title="GIFs" style="font-size:11px;font-weight:800;padding:5px 8px">GIF</button>
       <div class="i-gap"></div>
       <span class="slow-tag" id="slow-tag">⏱ Slow mode</span>
       <span class="lock-tag" id="lock-tag">🔒 Locked</span>
@@ -1047,8 +1047,6 @@ function esc(s) {
 }
 function fmt(t) {
   return t
-    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-    .replace(/\*(.+?)\*/g,    '<em>$1</em>')
     .replace(/`(.+?)`/g,      '<code style="background:var(--bg4);padding:1px 5px;border-radius:4px;font-size:12px">$1</code>')
     .replace(/(https?:\/\/[^\s<"]+)/g, '<a href="$1" target="_blank" rel="noopener">$1</a>');
 }
@@ -1246,6 +1244,14 @@ function scrollToMsg(id) {
     el.scrollIntoView({ behavior: 'smooth', block: 'center' });
     el.style.background = 'var(--bg4)';
     setTimeout(() => el.style.background = '', 2000);
+  }
+}
+
+function doLogout() {
+  if (confirm('Are you sure you want to logout? This will reset your profile.')) {
+    localStorage.removeItem('lc_name');
+    localStorage.removeItem('lc_uid');
+    location.reload();
   }
 }
 
