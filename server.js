@@ -38,7 +38,13 @@ function censor(text) {
     r = r.replace(new RegExp(`\\b${w}\\b`, 'gi'), m => m[0] + '*'.repeat(m.length - 1));
   return r;
 }
-function randColor() { return COLORS[Math.floor(Math.random() * COLORS.length)]; }
+function randColor(seed) {
+  if (!seed) return COLORS[Math.floor(Math.random() * COLORS.length)];
+  let hash = 0;
+  for (let i = 0; i < seed.length; i++) hash = seed.charCodeAt(i) + ((hash << 5) - hash);
+  const h = Math.abs(hash) % 360;
+  return `hsl(${h}, 70%, 65%)`;
+}
 function sysMsg(text) {
   return { id: uuidv4(), userId: 'system', username: 'System', text, type: 'system', ts: Date.now(), deleted: false, reactions: {} };
 }
@@ -76,11 +82,11 @@ function mapTenor(results = []) {
 }
 
 function mapGiphy(results = []) {
-  return results
+  return (results || [])
     .map(g => ({
       id:      g.id,
-      preview: g.images?.fixed_height_small?.url || g.images?.fixed_height?.url || '',
-      url:     g.images?.original?.url || '',
+      preview: g.images?.fixed_height_small?.url || g.images?.fixed_height?.url || g.images?.preview_gif?.url || '',
+      url:     g.images?.original?.url || g.images?.fixed_height?.url || '',
       title:   g.title || '',
       source:  'giphy'
     }))
@@ -123,7 +129,7 @@ io.on('connection', socket => {
   socket.on('join', ({ username, userId }) => {
     if (state.bannedIds.has(userId)) { socket.emit('banned'); socket.disconnect(); return; }
     const prev  = Object.values(state.users).find(u => u.id === userId);
-    const color = prev?.color || randColor();
+    const color = prev?.color || randColor(userId);
     const role  = prev?.role  || 'user';
     state.users[socket.id] = { id: userId, username, role, color, muted: false, socketId: socket.id };
     socket.emit('joined', { userId, role, color });
@@ -131,8 +137,6 @@ io.on('connection', socket => {
     socket.emit('polls_update',  state.polls);
     socket.emit('chat_settings', { slowMode: state.slowMode, chatLocked: state.chatLocked, pinnedMsgId: state.pinnedMsgId });
     broadcastUsers();
-    const m = sysMsg(`👋 ${username} joined`);
-    push(m); io.emit('new_message', m);
   });
 
   /* SEND MESSAGE */
@@ -321,7 +325,6 @@ io.on('connection', socket => {
   socket.on('disconnect', () => {
     const user = state.users[socket.id];
     if (user) {
-      const m = sysMsg(`👋 ${user.username} left`); push(m); io.emit('new_message', m);
       delete state.users[socket.id];
       broadcastUsers();
     }
