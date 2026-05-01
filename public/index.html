@@ -176,18 +176,19 @@ input,textarea{font-family:var(--f);outline:none;border:none;background:transpar
 /* ── Messages ── */
 #msgs{
   flex:1;overflow-y:auto;
-  padding:14px 18px 6px;
-  display:flex;flex-direction:column;gap:1px;
+  padding:20px 20px 10px;
+  display:flex;flex-direction:column;gap:4px;
 }
 
 /* Message row */
 .msg{
-  display:flex;align-items:flex-start;gap:9px;
-  padding:5px 8px;border-radius:var(--rs);
-  position:relative;transition:background .1s;
-  animation:msgIn .18s cubic-bezier(.16,1,.3,1);
+  display:flex;align-items:flex-start;gap:12px;
+  padding:8px 10px;border-radius:12px;
+  position:relative;transition:background .12s;
+  animation:msgIn .2s cubic-bezier(.16,1,.3,1);
+  margin-bottom:2px;
 }
-.msg:hover{background:var(--bg3)}
+.msg:hover{background:var(--bg2)}
 .msg:hover .macts{opacity:1;pointer-events:auto}
 
 .mavt{
@@ -205,7 +206,18 @@ input,textarea{font-family:var(--f);outline:none;border:none;background:transpar
 .mtime{font-size:11px;color:var(--text3);font-variant-numeric:tabular-nums}
 .mtext{font-size:14px;line-height:1.6;word-break:break-word}
 .mtext.del{color:var(--text3);font-style:italic}
-.mgif img{max-width:260px;max-height:200px;border-radius:10px;margin-top:5px;display:block;cursor:zoom-in}
+.mgif{
+  margin-top:8px;max-width:min(100%, 320px);
+  border-radius:12px;overflow:hidden;
+  border:1px solid var(--border2);
+  background:var(--bg3);
+  box-shadow:0 4px 12px rgba(0,0,0,.2);
+}
+.mgif img{
+  width:100%;height:auto;max-height:400px;
+  display:block;cursor:zoom-in;
+  object-fit:contain;
+}
 .mreacts{display:flex;flex-wrap:wrap;gap:3px;margin-top:4px}
 .rchip{
   display:flex;align-items:center;gap:3px;
@@ -379,13 +391,16 @@ input,textarea{font-family:var(--f);outline:none;border:none;background:transpar
   color:var(--text);font-size:13px;margin-bottom:9px;
 }
 #gif-grid{
-  display:grid;grid-template-columns:repeat(3,1fr);gap:4px;
-  max-height:250px;overflow-y:auto;
+  display:grid;grid-template-columns:repeat(2,1fr);gap:8px;
+  max-height:300px;overflow-y:auto;
+  padding:2px;
 }
 .gcell{
-  border-radius:7px;overflow:hidden;cursor:pointer;
-  aspect-ratio:1;background:var(--bg3);position:relative;
+  border-radius:10px;overflow:hidden;cursor:pointer;
+  aspect-ratio:1.5;background:var(--bg3);position:relative;
+  border:1px solid var(--border);transition:transform .15s;
 }
+.gcell:hover{transform:scale(1.02);border-color:var(--accent)}
 .gcell img{width:100%;height:100%;object-fit:cover;display:block}
 .gcell:hover{outline:2px solid var(--accent)}
 .gif-msg{text-align:center;padding:18px;color:var(--text2);font-size:13px;grid-column:1/-1}
