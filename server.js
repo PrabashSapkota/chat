@@ -202,7 +202,6 @@ io.on('connection', socket => {
     state.bannedIds.add(targetId);
     const t = Object.values(state.users).find(u => u.id === targetId);
     if (t) io.to(t.socketId).emit('banned');
-    const m = sysMsg(`🔨 ${t?.username || targetId} was banned`); push(m); io.emit('new_message', m);
     broadcastUsers();
   });
 
@@ -214,7 +213,6 @@ io.on('connection', socket => {
     if (!t) return;
     t.muted = muted;
     io.to(t.socketId).emit('muted', muted);
-    const m = sysMsg(`${muted ? '🔇' : '🔊'} ${t.username} ${muted ? 'muted' : 'unmuted'}`); push(m); io.emit('new_message', m);
     broadcastUsers();
   });
 
@@ -239,7 +237,11 @@ io.on('connection', socket => {
   });
 
 
-  /* CREATE POLL */
+  socket.on('unban_user', targetUserId => {
+    const user = state.users[socket.id];
+    if (!user || user.role !== 'admin') return;
+    state.bannedIds.delete(targetUserId);
+  });
   socket.on('create_poll', ({ question, options }) => {
     const user = state.users[socket.id];
     if (!user || !['admin','mod'].includes(user.role)) return;
