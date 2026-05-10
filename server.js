@@ -14,21 +14,10 @@ app.use(express.json());
 const fs = require('fs');
 
 /* ─── In-memory state ─────────────────────────────────────────────────────── */
-const BAN_FILE = path.join(__dirname, 'banned.json');
-let persistentBans = { ids: [], ips: [] };
-try {
-  if (fs.existsSync(BAN_FILE)) {
-    persistentBans = JSON.parse(fs.readFileSync(BAN_FILE, 'utf8'));
-    // Filter out common IPs from persistent bans to prevent mass lockout
-    persistentBans.ips = (persistentBans.ips || []).filter(ip => !['127.0.0.1', '::1', '::ffff:127.0.0.1', 'unknown'].includes(ip));
-  }
-} catch (e) { console.error('Error loading bans:', e); }
-
 const state = {
   messages:      [],   // {id,userId,username,text,type,ts,deleted,reactions,color,role}
   users:         {},   // socketId → user
-  bannedIds:     new Set(persistentBans.ids || []),
-  bannedIps:     new Set(persistentBans.ips || []),
+  bannedIds:     new Set(),
   polls:         [],   // {id,question,options:[{text,votes:[]}],createdBy,active,ts}
   pinnedMsgId:   null,
   slowMode:      0,
@@ -39,14 +28,6 @@ const state = {
   maxMessages:   400,
 };
 
-function saveBans() {
-  try {
-    fs.writeFileSync(BAN_FILE, JSON.stringify({
-      ids: Array.from(state.bannedIds),
-      ips: Array.from(state.bannedIps)
-    }, null, 2));
-  } catch (e) { console.error('Error saving bans:', e); }
-}
 
 const ADMIN_PASS  = 'prabashsapkota';
 const ADMIN_COLOR = '#ff6b35';
@@ -77,7 +58,14 @@ function getIp(socket) {
   if (forwarded) return forwarded.split(',')[0].trim();
   return socket.handshake.address;
 }
-const COMMON_IPS = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1', 'unknown']);
+function autoBan(userId, socketId) {
+  state.bannedIds.add(userId);
+  const s = io.sockets.sockets.get(socketId);
+  if (s) {
+    s.emit('banned');
+    s.disconnect();
+  }
+}
 function push(msg) {
   state.messages.push(msg);
   if (state.messages.length > state.maxMessages) state.messages.shift();
@@ -133,7 +121,7 @@ io.on('connection', socket => {
     const ip = getIp(socket);
     state.userIps[userId] = ip;
 
-    if (state.bannedIds.has(userId) || (ip && !COMMON_IPS.has(ip) && state.bannedIps.has(ip))) {
+    if (state.bannedIds.has(userId)) {
       socket.emit('banned');
       socket.disconnect();
       return;
@@ -154,8 +142,7 @@ io.on('connection', socket => {
     const msgType = type || 'text';
     const user = state.users[socket.id];
     if (!user) return;
-    const ip = getIp(socket);
-    if (state.bannedIds.has(user.id) || (ip && !COMMON_IPS.has(ip) && state.bannedIps.has(ip))) { socket.emit('banned'); return; }
+    if (state.bannedIds.has(user.id)) { socket.emit('banned'); return; }
     if (user.muted)                                          { socket.emit('error_msg', '🔇 You are muted.'); return; }
 
     // --- Anti-Spam ---
@@ -179,10 +166,9 @@ io.on('connection', socket => {
       state.burstHistory[user.id].push(now);
 
       if (state.burstHistory[user.id].length > 5) {
-        user.muted = true;
-        io.to(user.socketId).emit('muted', true);
-        broadcastUsers();
-        socket.emit('error_msg', '🔇 Auto-muted for spamming.');
+        autoBan(user.id, socket.id);
+        const m = sysMsg(`🔨 ${user.username} has been auto-banned for spamming.`);
+        push(m); io.emit('new_message', m);
         return;
       }
 
@@ -271,27 +257,6 @@ io.on('connection', socket => {
     const m = sysMsg('🗑️ Chat cleared by admin'); push(m); io.emit('new_message', m);
   });
 
-  /* BAN */
-  socket.on('ban_user', targetId => {
-    const user = state.users[socket.id];
-    if (!user || !['admin','mod'].includes(user.role)) return;
-    if (targetId === user.id) return; // Don't ban self
-
-    state.bannedIds.add(targetId);
-    
-    // IP Ban logic
-    const tIp = state.userIps[targetId];
-    if (tIp && !COMMON_IPS.has(tIp)) {
-      state.bannedIps.add(tIp);
-    }
-
-    const t = Object.values(state.users).find(u => u.id === targetId);
-    if (t) {
-      io.to(t.socketId).emit('banned');
-    }
-    saveBans();
-    broadcastUsers();
-  });
 
   /* MUTE */
   socket.on('mute_user', ({ targetUserId, muted }) => {
@@ -325,20 +290,6 @@ io.on('connection', socket => {
   });
 
 
-  socket.on('unban_user', targetUserId => {
-    const user = state.users[socket.id];
-    if (!user || !['admin','mod'].includes(user.role)) return;
-    
-    state.bannedIds.delete(targetUserId);
-    
-    // Also remove the IP if we know it
-    const tIp = state.userIps[targetUserId];
-    if (tIp) {
-      state.bannedIps.delete(tIp);
-    }
-    
-    saveBans();
-  });
   socket.on('create_poll', ({ question, options }) => {
     const user = state.users[socket.id];
     if (!user || !['admin','mod'].includes(user.role)) return;
