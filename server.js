@@ -19,6 +19,8 @@ let persistentBans = { ids: [], ips: [] };
 try {
   if (fs.existsSync(BAN_FILE)) {
     persistentBans = JSON.parse(fs.readFileSync(BAN_FILE, 'utf8'));
+    // Filter out common IPs from persistent bans to prevent mass lockout
+    persistentBans.ips = (persistentBans.ips || []).filter(ip => !['127.0.0.1', '::1', '::ffff:127.0.0.1', 'unknown'].includes(ip));
   }
 } catch (e) { console.error('Error loading bans:', e); }
 
@@ -33,6 +35,7 @@ const state = {
   lastMsgTime:   {},   // userId → timestamp
   lastMsgContent:{},   // userId → string
   burstHistory:  {},   // userId → timestamp[]
+  userIps:       {},   // userId → last known IP
   maxMessages:   400,
 };
 
@@ -69,6 +72,12 @@ function randColor(seed) {
 function sysMsg(text) {
   return { id: uuidv4(), userId: 'system', username: 'System', text, type: 'system', ts: Date.now(), deleted: false, reactions: {} };
 }
+function getIp(socket) {
+  const forwarded = socket.handshake.headers['x-forwarded-for'];
+  if (forwarded) return forwarded.split(',')[0].trim();
+  return socket.handshake.address;
+}
+const COMMON_IPS = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1', 'unknown']);
 function push(msg) {
   state.messages.push(msg);
   if (state.messages.length > state.maxMessages) state.messages.shift();
@@ -121,8 +130,10 @@ io.on('connection', socket => {
 
   /* JOIN */
   socket.on('join', ({ username, userId }) => {
-    const ip = socket.handshake.address;
-    if (state.bannedIds.has(userId) || state.bannedIps.has(ip)) {
+    const ip = getIp(socket);
+    state.userIps[userId] = ip;
+
+    if (state.bannedIds.has(userId) || (ip && !COMMON_IPS.has(ip) && state.bannedIps.has(ip))) {
       socket.emit('banned');
       socket.disconnect();
       return;
@@ -143,8 +154,8 @@ io.on('connection', socket => {
     const msgType = type || 'text';
     const user = state.users[socket.id];
     if (!user) return;
-    const ip = socket.handshake.address;
-    if (state.bannedIds.has(user.id) || state.bannedIps.has(ip)) { socket.emit('banned'); return; }
+    const ip = getIp(socket);
+    if (state.bannedIds.has(user.id) || (ip && !COMMON_IPS.has(ip) && state.bannedIps.has(ip))) { socket.emit('banned'); return; }
     if (user.muted)                                          { socket.emit('error_msg', '🔇 You are muted.'); return; }
 
     // --- Anti-Spam ---
@@ -264,12 +275,18 @@ io.on('connection', socket => {
   socket.on('ban_user', targetId => {
     const user = state.users[socket.id];
     if (!user || !['admin','mod'].includes(user.role)) return;
-    
+    if (targetId === user.id) return; // Don't ban self
+
     state.bannedIds.add(targetId);
+    
+    // IP Ban logic
+    const tIp = state.userIps[targetId];
+    if (tIp && !COMMON_IPS.has(tIp)) {
+      state.bannedIps.add(tIp);
+    }
+
     const t = Object.values(state.users).find(u => u.id === targetId);
     if (t) {
-      const tIp = io.sockets.sockets.get(t.socketId)?.handshake.address;
-      if (tIp) state.bannedIps.add(tIp);
       io.to(t.socketId).emit('banned');
     }
     saveBans();
@@ -311,12 +328,15 @@ io.on('connection', socket => {
   socket.on('unban_user', targetUserId => {
     const user = state.users[socket.id];
     if (!user || !['admin','mod'].includes(user.role)) return;
+    
     state.bannedIds.delete(targetUserId);
-    // Note: We don't necessarily know which IP was associated with this ID if they are offline,
-    // but for simplicity we could either clear all IPs or just leave them.
-    // Given the requirement "make the user banned even if they refreshed or changed username",
-    // clearing IPs might be tricky without a mapping.
-    // Let's assume for now we just clear the ID. If we wanted to clear the IP, we'd need a mapping.
+    
+    // Also remove the IP if we know it
+    const tIp = state.userIps[targetUserId];
+    if (tIp) {
+      state.bannedIps.delete(tIp);
+    }
+    
     saveBans();
   });
   socket.on('create_poll', ({ question, options }) => {
