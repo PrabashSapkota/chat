@@ -1,0 +1,378 @@
+const express = require('express');
+const http    = require('http');
+const { Server } = require('socket.io');
+const { v4: uuidv4 } = require('uuid');
+const path = require('path');
+
+const app    = express();
+const server = http.createServer(app);
+const io     = new Server(server, { cors: { origin: '*', methods: ['GET','POST'] } });
+
+app.use(express.static(path.join(__dirname, 'public')));
+app.use(express.json());
+
+const fs = require('fs');
+
+/* ─── In-memory state ─────────────────────────────────────────────────────── */
+const BAN_FILE = path.join(__dirname, 'banned.json');
+let persistentBans = { ids: [], ips: [] };
+try {
+  if (fs.existsSync(BAN_FILE)) {
+    persistentBans = JSON.parse(fs.readFileSync(BAN_FILE, 'utf8'));
+  }
+} catch (e) { console.error('Error loading bans:', e); }
+
+const state = {
+  messages:      [],   // {id,userId,username,text,type,ts,deleted,reactions,color,role}
+  users:         {},   // socketId → user
+  bannedIds:     new Set(persistentBans.ids || []),
+  bannedIps:     new Set(persistentBans.ips || []),
+  polls:         [],   // {id,question,options:[{text,votes:[]}],createdBy,active,ts}
+  pinnedMsgId:   null,
+  slowMode:      0,
+  lastMsgTime:   {},   // userId → timestamp
+  lastMsgContent:{},   // userId → string
+  burstHistory:  {},   // userId → timestamp[]
+  maxMessages:   400,
+};
+
+function saveBans() {
+  try {
+    fs.writeFileSync(BAN_FILE, JSON.stringify({
+      ids: Array.from(state.bannedIds),
+      ips: Array.from(state.bannedIps)
+    }, null, 2));
+  } catch (e) { console.error('Error saving bans:', e); }
+}
+
+const ADMIN_PASS  = 'prabashsapkota';
+const ADMIN_COLOR = '#ff6b35';
+const MOD_COLOR   = '#7ed321';
+const COLORS = ['#61dafb','#c084fc','#fb923c','#34d399','#f472b6','#a78bfa','#38bdf8','#fbbf24','#e879f9','#4ade80','#f87171','#60a5fa'];
+
+const BAD_WORDS = ['fuck','shit','bitch','asshole','bastard','cunt','dick','pussy','cock','motherfucker','fag','faggot','nigger','nigga','retard','whore','slut','twat','wanker','bollocks','shite','arse','prick'];
+
+/* ─── Helpers ─────────────────────────────────────────────────────────────── */
+function censor(text) {
+  let r = text;
+  for (const w of BAD_WORDS)
+    r = r.replace(new RegExp(`\\b${w}\\b`, 'gi'), m => m[0] + '*'.repeat(m.length - 1));
+  return r;
+}
+function randColor(seed) {
+  if (!seed) return COLORS[Math.floor(Math.random() * COLORS.length)];
+  let hash = 0;
+  for (let i = 0; i < seed.length; i++) hash = seed.charCodeAt(i) + ((hash << 5) - hash);
+  const h = Math.abs(hash) % 360;
+  return `hsl(${h}, 70%, 65%)`;
+}
+function sysMsg(text) {
+  return { id: uuidv4(), userId: 'system', username: 'System', text, type: 'system', ts: Date.now(), deleted: false, reactions: {} };
+}
+function push(msg) {
+  state.messages.push(msg);
+  if (state.messages.length > state.maxMessages) state.messages.shift();
+}
+function broadcastUsers() {
+  io.emit('users_update', Object.values(state.users).map(u => ({
+    id: u.id, username: u.username, role: u.role, color: u.color, muted: u.muted
+  })));
+}
+function broadcastSettings() {
+  io.emit('chat_settings', {
+    slowMode:   state.slowMode,
+    pinnedMsgId: state.pinnedMsgId,
+  });
+}
+
+/* ── GIF proxy (Giphy) ────────────────────────────────────────────────────── */
+const GIPHY_KEY = process.env.GIPHY_API_KEY || 'x2NUFYUd98RwHScVZJbOLSBtereb5gZ5';
+
+function mapGiphy(results = []) {
+  return (results || [])
+    .map(g => ({
+      id:      g.id,
+      preview: g.images?.fixed_height_small?.url || g.images?.fixed_height?.url || g.images?.preview_gif?.url || '',
+      url:     g.images?.original?.url || g.images?.fixed_height?.url || '',
+      title:   g.title || '',
+    }))
+    .filter(g => g.preview && g.url);
+}
+
+app.get('/api/gifs/trending', async (_req, res) => {
+  try {
+    const r = await fetch(`https://api.giphy.com/v1/gifs/trending?api_key=${GIPHY_KEY}&limit=24`);
+    const d = await r.json();
+    res.json(mapGiphy(d.data));
+  } catch (e) { console.error('Giphy trending:', e.message); res.json([]); }
+});
+
+app.get('/api/gifs/search', async (req, res) => {
+  try {
+    const q = encodeURIComponent(req.query.q || 'funny');
+    const r = await fetch(`https://api.giphy.com/v1/gifs/search?api_key=${GIPHY_KEY}&q=${q}&limit=24`);
+    const d = await r.json();
+    res.json(mapGiphy(d.data));
+  } catch (e) { console.error('Giphy search:', e.message); res.json([]); }
+});
+
+/* ─── Socket.IO ───────────────────────────────────────────────────────────── */
+io.on('connection', socket => {
+
+  /* JOIN */
+  socket.on('join', ({ username, userId }) => {
+    const ip = socket.handshake.address;
+    if (state.bannedIds.has(userId) || state.bannedIps.has(ip)) {
+      socket.emit('banned');
+      socket.disconnect();
+      return;
+    }
+    const prev  = Object.values(state.users).find(u => u.id === userId);
+    const color = prev?.color || randColor(userId);
+    const role  = prev?.role  || 'user';
+    state.users[socket.id] = { id: userId, username, role, color, muted: false, socketId: socket.id };
+    socket.emit('joined', { userId, role, color });
+    socket.emit('chat_history',  state.messages.slice(-100));
+    socket.emit('polls_update',  state.polls);
+    socket.emit('chat_settings', { slowMode: state.slowMode, chatLocked: state.chatLocked, pinnedMsgId: state.pinnedMsgId });
+    broadcastUsers();
+  });
+
+  /* SEND MESSAGE */
+  socket.on('send_message', ({ text, type, replyToId }) => {
+    const msgType = type || 'text';
+    const user = state.users[socket.id];
+    if (!user) return;
+    const ip = socket.handshake.address;
+    if (state.bannedIds.has(user.id) || state.bannedIps.has(ip)) { socket.emit('banned'); return; }
+    if (user.muted)                                          { socket.emit('error_msg', '🔇 You are muted.'); return; }
+
+    // --- Anti-Spam ---
+    if (!['admin','mod'].includes(user.role)) {
+      // 1. Length Check
+      if (text.length > 1000) { socket.emit('error_msg', '📏 Message too long.'); return; }
+
+      // 2. Link Check
+      const urlRegex = /(https?:\/\/[^\s<"]+)/i;
+      if (urlRegex.test(text)) { socket.emit('error_msg', '🚫 Only moderators can send links.'); return; }
+
+      // 3. Duplicate Check
+      if (text.trim() === state.lastMsgContent[user.id] && msgType === 'text') {
+        socket.emit('error_msg', '🚫 Please don\'t repeat yourself.'); return;
+      }
+
+      // 4. Burst Protection (Auto-mute)
+      const now = Date.now();
+      if (!state.burstHistory[user.id]) state.burstHistory[user.id] = [];
+      state.burstHistory[user.id] = state.burstHistory[user.id].filter(ts => now - ts < 5000); 
+      state.burstHistory[user.id].push(now);
+
+      if (state.burstHistory[user.id].length > 5) {
+        user.muted = true;
+        io.to(user.socketId).emit('muted', true);
+        broadcastUsers();
+        socket.emit('error_msg', '🔇 Auto-muted for spamming.');
+        return;
+      }
+
+      // 5. Caps Check
+      if (text.length > 20) {
+        const caps = text.replace(/[^A-Z]/g, "").length;
+        if (caps / text.length > 0.7) text = text.toLowerCase();
+      }
+    }
+
+    if (state.slowMode > 0 && user.role === 'user') {
+      const last = state.lastMsgTime[user.id] || 0;
+      if (Date.now() - last < state.slowMode * 1000)         { socket.emit('error_msg', `⏱ Slow mode: wait ${state.slowMode}s.`); return; }
+    }
+
+    /* Admin promote */
+    if (text.trim() === `/admin=${ADMIN_PASS}`) {
+      user.role = 'admin'; user.color = ADMIN_COLOR;
+      socket.emit('role_update', { role: 'admin', color: ADMIN_COLOR });
+      broadcastUsers();
+      const m = sysMsg(`🛡️ ${user.username} is now Admin`);
+      push(m); io.emit('new_message', m);
+      return;
+    }
+
+    const body = msgType === 'text' ? censor(text) : text;
+    const msg  = { 
+      id: uuidv4(), 
+      userId: user.id, 
+      username: user.username, 
+      text: body, 
+      type: msgType, 
+      ts: Date.now(), 
+      deleted: false, 
+      reactions: {}, 
+      color: user.color, 
+      role: user.role,
+      replyTo: replyToId ? state.messages.find(m => m.id === replyToId && !m.deleted) : null
+    };
+    state.lastMsgTime[user.id] = Date.now();
+    state.lastMsgContent[user.id] = msgType === 'text' ? text.trim() : null;
+    push(msg); io.emit('new_message', msg);
+  });
+
+  /* TYPING */
+  socket.on('typing', isTyping => {
+    const user = state.users[socket.id];
+    if (user) socket.broadcast.emit('user_typing', { username: user.username, isTyping });
+  });
+
+  /* REACT */
+  socket.on('react', ({ messageId, emoji }) => {
+    const user = state.users[socket.id];
+    if (!user) return;
+    const msg = state.messages.find(m => m.id === messageId);
+    if (!msg) return;
+    if (!msg.reactions[emoji]) msg.reactions[emoji] = [];
+    const idx = msg.reactions[emoji].indexOf(user.id);
+    if (idx === -1) msg.reactions[emoji].push(user.id);
+    else            msg.reactions[emoji].splice(idx, 1);
+    io.emit('reaction_update', { messageId, reactions: msg.reactions });
+  });
+
+  /* DELETE MESSAGE */
+  socket.on('delete_message', id => {
+    const user = state.users[socket.id];
+    if (!user || !['admin','mod'].includes(user.role)) return;
+    const msg = state.messages.find(m => m.id === id);
+    if (msg) { msg.deleted = true; io.emit('message_deleted', id); }
+  });
+
+  /* PIN / UNPIN MESSAGE */
+  socket.on('pin_message', id => {
+    const user = state.users[socket.id];
+    if (!user || !['admin','mod'].includes(user.role)) return;
+    state.pinnedMsgId = id; // id can be null to unpin
+    broadcastSettings();
+  });
+
+  /* CLEAR CHAT */
+  socket.on('clear_chat', () => {
+    const user = state.users[socket.id];
+    if (!user || !['admin','mod'].includes(user.role)) return;
+    state.messages.length = 0; state.pinnedMsgId = null;
+    io.emit('chat_cleared');
+    const m = sysMsg('🗑️ Chat cleared by admin'); push(m); io.emit('new_message', m);
+  });
+
+  /* BAN */
+  socket.on('ban_user', targetId => {
+    const user = state.users[socket.id];
+    if (!user || !['admin','mod'].includes(user.role)) return;
+    
+    state.bannedIds.add(targetId);
+    const t = Object.values(state.users).find(u => u.id === targetId);
+    if (t) {
+      const tIp = io.sockets.sockets.get(t.socketId)?.handshake.address;
+      if (tIp) state.bannedIps.add(tIp);
+      io.to(t.socketId).emit('banned');
+    }
+    saveBans();
+    broadcastUsers();
+  });
+
+  /* MUTE */
+  socket.on('mute_user', ({ targetUserId, muted }) => {
+    const user = state.users[socket.id];
+    if (!user || !['admin','mod'].includes(user.role)) return;
+    const t = Object.values(state.users).find(u => u.id === targetUserId);
+    if (!t) return;
+    t.muted = muted;
+    io.to(t.socketId).emit('muted', muted);
+    broadcastUsers();
+  });
+
+  /* SET ROLE */
+  socket.on('set_role', ({ targetUserId, role }) => {
+    const user = state.users[socket.id];
+    if (!user || !['admin','mod'].includes(user.role)) return;
+    const t = Object.values(state.users).find(u => u.id === targetUserId);
+    if (!t) return;
+    t.role = role; t.color = role === 'mod' ? MOD_COLOR : randColor();
+    io.to(t.socketId).emit('role_update', { role: t.role, color: t.color });
+    const m = sysMsg(`⭐ ${t.username} is now ${role}`); push(m); io.emit('new_message', m);
+    broadcastUsers();
+  });
+
+  /* SLOW MODE */
+  socket.on('set_slow_mode', secs => {
+    const user = state.users[socket.id];
+    if (!user || !['admin','mod'].includes(user.role)) return;
+    state.slowMode = Math.max(0, parseInt(secs) || 0); broadcastSettings();
+    const m = sysMsg(state.slowMode > 0 ? `⏱ Slow mode: ${state.slowMode}s` : '⏱ Slow mode off'); push(m); io.emit('new_message', m);
+  });
+
+
+  socket.on('unban_user', targetUserId => {
+    const user = state.users[socket.id];
+    if (!user || !['admin','mod'].includes(user.role)) return;
+    state.bannedIds.delete(targetUserId);
+    // Note: We don't necessarily know which IP was associated with this ID if they are offline,
+    // but for simplicity we could either clear all IPs or just leave them.
+    // Given the requirement "make the user banned even if they refreshed or changed username",
+    // clearing IPs might be tricky without a mapping.
+    // Let's assume for now we just clear the ID. If we wanted to clear the IP, we'd need a mapping.
+    saveBans();
+  });
+  socket.on('create_poll', ({ question, options }) => {
+    const user = state.users[socket.id];
+    if (!user || !['admin','mod'].includes(user.role)) return;
+    const poll = { id: uuidv4(), question, options: options.map(t => ({ text: t, votes: [] })), createdBy: user.username, active: true, ts: Date.now() };
+    state.polls.push(poll);
+    io.emit('polls_update', state.polls);
+    const m = sysMsg(`📊 New poll: "${question}"`); push(m); io.emit('new_message', m);
+  });
+
+  /* VOTE POLL */
+  socket.on('vote_poll', ({ pollId, optionIndex }) => {
+    const user = state.users[socket.id];
+    if (!user) return;
+    const poll = state.polls.find(p => p.id === pollId);
+    if (!poll || !poll.active) return;
+    poll.options.forEach(o => { const i = o.votes.indexOf(user.id); if (i !== -1) o.votes.splice(i, 1); });
+    if (poll.options[optionIndex]) poll.options[optionIndex].votes.push(user.id);
+    io.emit('polls_update', state.polls);
+  });
+
+  /* CLOSE / DELETE POLL */
+  socket.on('close_poll', id => {
+    const user = state.users[socket.id];
+    if (!user || !['admin','mod'].includes(user.role)) return;
+    const p = state.polls.find(p => p.id === id);
+    if (p) { p.active = false; io.emit('polls_update', state.polls); }
+  });
+  socket.on('delete_poll', id => {
+    const user = state.users[socket.id];
+    if (!user || !['admin','mod'].includes(user.role)) return;
+    const i = state.polls.findIndex(p => p.id === id);
+    if (i !== -1) { state.polls.splice(i, 1); io.emit('polls_update', state.polls); }
+  });
+
+  /* WHISPER */
+  socket.on('whisper', ({ targetUserId, text }) => {
+    const user = state.users[socket.id];
+    if (!user) return;
+    const t = Object.values(state.users).find(u => u.id === targetUserId);
+    if (!t) return;
+    const base = { id: uuidv4(), userId: user.id, username: user.username, type: 'whisper', ts: Date.now(), deleted: false, reactions: {}, color: user.color, role: user.role };
+    socket.emit('new_message',       { ...base, text: `💌 [to ${t.username}] ${censor(text)}` });
+    io.to(t.socketId).emit('new_message', { ...base, text: `💌 [from ${user.username}] ${censor(text)}` });
+  });
+
+  /* DISCONNECT */
+  socket.on('disconnect', () => {
+    const user = state.users[socket.id];
+    if (user) {
+      delete state.users[socket.id];
+      broadcastUsers();
+    }
+  });
+});
+
+const PORT = process.env.PORT || 3000;
+server.listen(PORT, () => console.log(`🚀  LiveChat  →  http://localhost:${PORT}`));
