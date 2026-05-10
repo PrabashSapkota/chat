@@ -1599,7 +1599,6 @@ function openCtxByUid(uid,evt) {
     html+=`<div class="cdiv"></div>`;
     html+=`<div class="ci warn" onclick="socket.emit('mute_user',{targetUserId:'${uid}',muted:${!u.muted}});closeCtx()">${u.muted?'🔊 Unmute':'🔇 Mute'}</div>`;
     html+=`<div class="ci danger" onclick="doDeleteAll('${uid}','${esc(u.username)}')">🗑 Delete All Messages</div>`;
-    html+=`<div class="ci danger" onclick="if(confirm('Ban ${esc(u.username)}?'))socket.emit('ban_user','${uid}');closeCtx()">🔨 Ban User</div>`;
     html+=`<div class="cdiv"></div>`;
     html+=`<div class="ci ok" onclick="socket.emit('set_role',{targetUserId:'${uid}',role:'mod'});closeCtx()">⭐ Make Mod</div>`;
     html+=`<div class="ci" onclick="socket.emit('set_role',{targetUserId:'${uid}',role:'user'});closeCtx()">👤 Remove Mod</div>`;
