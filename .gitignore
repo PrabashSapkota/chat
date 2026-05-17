@@ -1,0 +1,4 @@
+node_modules/
+chat-data.json
+*.log
+.DS_Store
