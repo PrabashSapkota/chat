@@ -12,21 +12,53 @@ app.use(express.static(path.join(__dirname, 'public')));
 app.use(express.json());
 
 const fs = require('fs');
+const DATA_FILE = path.join(__dirname, 'chat-data.json');
 
-/* ─── In-memory state ─────────────────────────────────────────────────────── */
+/* ─── In-memory state (defined first) ────────────────────────────────────── */
 const state = {
-  messages:      [],   // {id,userId,username,text,type,ts,deleted,reactions,color,role}
-  users:         {},   // socketId → user
+  messages:      [],
+  users:         {},
   bannedIds:     new Set(),
-  polls:         [],   // {id,question,options:[{text,votes:[]}],createdBy,active,ts}
+  polls:         [],
   pinnedMsgId:   null,
   slowMode:      0,
-  lastMsgTime:   {},   // userId → timestamp
-  lastMsgContent:{},   // userId → string
-  burstHistory:  {},   // userId → timestamp[]
-  userIps:       {},   // userId → last known IP
-  maxMessages:   400,
+  lastMsgTime:   {},
+  lastMsgContent:{},
+  burstHistory:  {},
+  userIps:       {},
+  maxMessages:   200,
 };
+
+/* ─── File-based Persistence ─────────────────────────────────────────────── */
+function loadData() {
+  try {
+    if (fs.existsSync(DATA_FILE)) {
+      const data = JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
+      state.messages = data.messages || [];
+      state.bannedIds = new Set(data.bannedIds || []);
+      state.polls = data.polls || [];
+      state.pinnedMsgId = data.pinnedMsgId || null;
+      state.slowMode = data.slowMode || 0;
+      console.log(`[DB] Loaded ${state.messages.length} messages, ${state.polls.length} polls`);
+    }
+  } catch (e) { console.error('[DB] Load error:', e.message); }
+}
+
+function saveData() {
+  try {
+    const data = {
+      messages: state.messages.slice(-500),
+      bannedIds: Array.from(state.bannedIds),
+      polls: state.polls,
+      pinnedMsgId: state.pinnedMsgId,
+      slowMode: state.slowMode
+    };
+    fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
+  } catch (e) { console.error('[DB] Save error:', e.message); }
+}
+
+loadData();
+setInterval(saveData, 30000);
 
 
 const ADMIN_PASS  = 'prabashsapkota';
@@ -68,7 +100,8 @@ function autoBan(userId, socketId) {
 }
 function push(msg) {
   state.messages.push(msg);
-  if (state.messages.length > state.maxMessages) state.messages.shift();
+  while (state.messages.length > state.maxMessages) state.messages.shift();
+  saveData();
 }
 function broadcastUsers() {
   io.emit('users_update', Object.values(state.users).map(u => ({
@@ -244,7 +277,8 @@ io.on('connection', socket => {
   socket.on('pin_message', id => {
     const user = state.users[socket.id];
     if (!user || !['admin','mod'].includes(user.role)) return;
-    state.pinnedMsgId = id; // id can be null to unpin
+    state.pinnedMsgId = id;
+    saveData();
     broadcastSettings();
   });
 
@@ -285,7 +319,9 @@ io.on('connection', socket => {
   socket.on('set_slow_mode', secs => {
     const user = state.users[socket.id];
     if (!user || !['admin','mod'].includes(user.role)) return;
-    state.slowMode = Math.max(0, parseInt(secs) || 0); broadcastSettings();
+    state.slowMode = Math.max(0, parseInt(secs) || 0);
+    saveData();
+    broadcastSettings();
     const m = sysMsg(state.slowMode > 0 ? `⏱ Slow mode: ${state.slowMode}s` : '⏱ Slow mode off'); push(m); io.emit('new_message', m);
   });
 
@@ -296,6 +332,7 @@ io.on('connection', socket => {
     const poll = { id: uuidv4(), question, options: options.map(t => ({ text: t, votes: [] })), createdBy: user.username, active: true, ts: Date.now() };
     state.polls.push(poll);
     io.emit('polls_update', state.polls);
+    saveData();
     const m = sysMsg(`📊 New poll: "${question}"`); push(m); io.emit('new_message', m);
   });
 
@@ -315,13 +352,13 @@ io.on('connection', socket => {
     const user = state.users[socket.id];
     if (!user || !['admin','mod'].includes(user.role)) return;
     const p = state.polls.find(p => p.id === id);
-    if (p) { p.active = false; io.emit('polls_update', state.polls); }
+    if (p) { p.active = false; saveData(); io.emit('polls_update', state.polls); }
   });
   socket.on('delete_poll', id => {
     const user = state.users[socket.id];
     if (!user || !['admin','mod'].includes(user.role)) return;
     const i = state.polls.findIndex(p => p.id === id);
-    if (i !== -1) { state.polls.splice(i, 1); io.emit('polls_update', state.polls); }
+    if (i !== -1) { state.polls.splice(i, 1); saveData(); io.emit('polls_update', state.polls); }
   });
 
   /* WHISPER */
