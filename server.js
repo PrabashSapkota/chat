@@ -183,9 +183,11 @@ io.on('connection', socket => {
       // 1. Length Check
       if (text.length > 1000) { socket.emit('error_msg', '📏 Message too long.'); return; }
 
-      // 2. Link Check
-      const urlRegex = /(https?:\/\/[^\s<"]+)/i;
-      if (urlRegex.test(text)) { socket.emit('error_msg', '🚫 Only moderators can send links.'); return; }
+      // 2. Link Check (skip for GIFs - everyone can send GIFs)
+      if (msgType !== 'gif') {
+        const urlRegex = /(https?:\/\/[^\s<"]+)/i;
+        if (urlRegex.test(text)) { socket.emit('error_msg', '🚫 Only moderators can send links.'); return; }
+      }
 
       // 3. Duplicate Check
       if (text.trim() === state.lastMsgContent[user.id] && msgType === 'text') {
