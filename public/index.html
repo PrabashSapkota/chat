@@ -243,39 +243,6 @@ a:hover { text-decoration:underline; }
 
 .hbtn.danger-btn:hover { background:rgba(239,68,68,.1); color:var(--red); border-color:rgba(239,68,68,.25); }
 
-/* ── SEARCH OVERLAY ── */
-#search-overlay {
-  display:none; position:fixed; top:52px; left:0; right:0;
-  background:var(--s2); border-bottom:1px solid var(--b2);
-  padding:12px 16px; z-index:30; gap:10px; align-items:center;
-  box-shadow:var(--sh2);
-}
-#search-overlay.on { display:flex; }
-#search-inp {
-  flex:1; padding:8px 12px; background:var(--s3); border:1px solid var(--b2);
-  border-radius:var(--rs); color:var(--t1); font-size:13px;
-}
-#search-inp:focus { border-color:var(--p); }
-#search-count { font-size:12px; color:var(--t3); white-space:nowrap; }
-#search-prev,#search-next {
-  padding:6px 10px; background:var(--s4); border:1px solid var(--b2);
-  border-radius:var(--rs); color:var(--t2); font-size:14px;
-}
-#search-prev:hover,#search-next:hover { background:var(--s5); color:var(--t1); }
-#close-search {
-  padding:6px 10px; background:transparent; border:none; color:var(--t3); font-size:16px;
-}
-#close-search:hover { color:var(--red); }
-
-.msg.highlight { background:rgba(77,124,254,.15); animation:pulse .5s; }
-@keyframes pulse {
-  0%,100%{background:rgba(77,124,254,.15);}
-  50%{background:rgba(77,124,254,.3);}
-}
-
-/* ── SOUND TOGGLE ── */
-.hbtn.muted .hbtn-icon { opacity:.4; }
-
 /* ── MSG COUNT ── */
 .hdr-msgcnt {
   font-size:11px; color:var(--t4); background:var(--s3); border:1px solid var(--b1);
@@ -909,31 +876,13 @@ code {
     <button class="hbtn" onclick="toggleUsers()">
       <span class="hbtn-icon">👥</span><span class="btn-label">Users</span>
     </button>
-    <button class="hbtn" id="sound-btn" onclick="toggleSound()" title="Toggle Sound">
-      <span class="hbtn-icon">🔊</span>
-    </button>
-    <button class="hbtn" onclick="toggleSearch()" title="Search Messages">
-      <span class="hbtn-icon">🔍</span>
-    </button>
     <button class="hbtn" id="poll-hbtn" style="display:none" onclick="showPollModal()">
       <span class="hbtn-icon">📊</span><span class="btn-label">Poll</span>
     </button>
     <button class="hbtn admin-btn" id="admin-hbtn" style="display:none" onclick="showAdminPanel()">
       <span class="hbtn-icon">🛡</span><span class="btn-label">Admin</span>
     </button>
-  </div>
-
-  <!-- Search -->
-  <div id="search-overlay">
-    <button id="close-search" onclick="toggleSearch()">✕</button>
-    <input type="text" id="search-inp" placeholder="Search messages..." oninput="doSearch()">
-    <span id="search-count"></span>
-    <button id="search-prev" onclick="searchPrev()">↑</button>
-    <button id="search-next" onclick="searchNext()">↓</button>
-  </div>
-
-  <!-- Scroll Hint -->
-  <div id="scroll-hint" onclick="scrollBot()">↓ New messages</div>
+</div>
 
   <!-- Pinned -->
   <div id="pinned">
@@ -1290,23 +1239,7 @@ function connectSocket() {
     if (messages.length > 500) messages.shift();
     addMsg(msg, true, prev);
     updateMsgCount();
-    if (soundEnabled && msg.userId !== myId) playSound();
   });
-
-function playSound() {
-  try {
-    const ctx = new (window.AudioContext || window.webkitAudioContext)();
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-    osc.connect(gain);
-    gain.connect(ctx.destination);
-    osc.frequency.value = 800;
-    gain.gain.setValueAtTime(0.1, ctx.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.1);
-    osc.start(ctx.currentTime);
-    osc.stop(ctx.currentTime + 0.1);
-  } catch(e) {}
-}
 
   socket.on('message_deleted', id => {
     const el = document.querySelector(`[data-mid="${id}"]`);
@@ -1647,73 +1580,6 @@ function closeRMenu(){document.getElementById('rmenu').classList.remove('on');}
 
 /* ── Users panel ── */
 function toggleUsers(){document.getElementById('upanel').classList.toggle('on');}
-
-/* ── Sound Toggle ── */
-let soundEnabled = localStorage.getItem('lc_sound') !== 'false';
-function toggleSound() {
-  soundEnabled = !soundEnabled;
-  localStorage.setItem('lc_sound', soundEnabled);
-  const btn = document.getElementById('sound-btn');
-  btn.classList.toggle('muted', !soundEnabled);
-  btn.querySelector('.hbtn-icon').textContent = soundEnabled ? '🔊' : '🔇';
-  showNotif(soundEnabled ? '🔔 Sound enabled' : '🔕 Sound disabled');
-}
-document.getElementById('sound-btn').classList.toggle('muted', !soundEnabled);
-if (!soundEnabled) document.getElementById('sound-btn').querySelector('.hbtn-icon').textContent = '🔇';
-
-/* ── Keyboard Shortcuts ── */
-document.addEventListener('keydown', e => {
-  if (e.key === 'Escape') {
-    closePicker('e'); closePicker('g');
-    document.getElementById('search-overlay').classList.remove('on');
-    document.getElementById('poll-modal').classList.remove('on');
-    document.getElementById('admin-panel').classList.remove('on');
-    closeRMenu(); closeCtx();
-  }
-  if (e.key === 'Enter' && e.ctrlKey) {
-    document.getElementById('send-btn').click();
-  }
-  if (e.key === '/' && document.activeElement !== document.getElementById('inp')) {
-    e.preventDefault();
-    document.getElementById('inp').focus();
-  }
-});
-
-/* ── Search ── */
-let searchResults = [], searchIdx = -1;
-function toggleSearch() {
-  const el = document.getElementById('search-overlay');
-  el.classList.toggle('on');
-  if (el.classList.contains('on')) {
-    document.getElementById('search-inp').focus();
-  } else {
-    document.getElementById('search-inp').value = '';
-    document.getElementById('search-count').textContent = '';
-    searchResults = [];
-    document.querySelectorAll('.msg.highlight').forEach(m => m.classList.remove('highlight'));
-  }
-}
-function doSearch() {
-  const q = document.getElementById('search-inp').value.toLowerCase().trim();
-  document.querySelectorAll('.msg.highlight').forEach(m => m.classList.remove('highlight'));
-  if (!q) { searchResults = []; document.getElementById('search-count').textContent = ''; return; }
-  searchResults = messages.filter(m => m.type !== 'system' && (m.text?.toLowerCase().includes(q) || m.username.toLowerCase().includes(q)));
-  searchIdx = searchResults.length > 0 ? 0 : -1;
-  document.getElementById('search-count').textContent = searchResults.length ? `${searchIdx + 1}/${searchResults.length}` : '0 results';
-  if (searchIdx >= 0) scrollToMsg(searchResults[searchIdx].id);
-}
-function searchPrev() {
-  if (!searchResults.length) return;
-  searchIdx = (searchIdx - 1 + searchResults.length) % searchResults.length;
-  document.getElementById('search-count').textContent = `${searchIdx + 1}/${searchResults.length}`;
-  scrollToMsg(searchResults[searchIdx].id);
-}
-function searchNext() {
-  if (!searchResults.length) return;
-  searchIdx = (searchIdx + 1) % searchResults.length;
-  document.getElementById('search-count').textContent = `${searchIdx + 1}/${searchResults.length}`;
-  scrollToMsg(searchResults[searchIdx].id);
-}
 
 function renderUsers() {
   const list=document.getElementById('ulist');
