@@ -239,10 +239,7 @@ body::before {
   box-shadow:0 2px 8px rgba(0,0,0,.3);
 }
 
-.msg.grouped { padding-top:1px; padding-bottom:1px; }
-.msg.grouped .mavt { background:transparent !important; color:transparent !important; box-shadow:none; }
-.msg.grouped .mts-hover { display:flex; }
-.msg.grouped .mmeta { display:none; }
+/* No grouping — every message shows avatar + username */
 
 .mbody { flex:1; min-width:0; }
 
@@ -262,11 +259,7 @@ body::before {
 
 .mtime { font-size:10px; color:var(--t4); font-family:var(--fm); }
 
-.mts-hover {
-  display:none; position:absolute; left:24px; top:50%; transform:translateY(-50%);
-  width:34px; align-items:center; justify-content:center;
-  font-size:9px; color:var(--t4); font-family:var(--fm);
-}
+
 
 .mtext { font-size:14px; line-height:1.7; word-break:break-word; color:var(--t1); }
 .mtext.del { color:var(--t4); font-style:italic; font-size:13px; }
@@ -865,11 +858,11 @@ code {
 
   <!-- Messages area -->
   <div id="msgs">
-    <!-- Placeholder shown when not logged in -->
+    <!-- Placeholder shown briefly while connecting -->
     <div id="msgs-placeholder">
       <div class="mp-icon">💬</div>
-      <div class="mp-text">Welcome to LiveChat</div>
-      <div class="mp-sub">Enter your username below to join the conversation.</div>
+      <div class="mp-text">Connecting to chat…</div>
+      <div class="mp-sub">Messages will appear here shortly.</div>
     </div>
   </div>
 
@@ -1100,8 +1093,10 @@ let joined=false;
   const savedId   = localStorage.getItem('lc_uid');
   if (savedName && savedId) {
     myName = savedName; myId = savedId;
-    activateChat(); connectSocket();
+    activateChat();
   }
+  // Always connect socket — guests see messages read-only before joining
+  connectSocket();
 })();
 
 /* ── Join logic ── */
@@ -1113,7 +1108,9 @@ function doJoin() {
   myId = localStorage.getItem('lc_uid') || crypto.randomUUID();
   localStorage.setItem('lc_name', myName);
   localStorage.setItem('lc_uid', myId);
-  activateChat(); connectSocket();
+  activateChat();
+  // Emit join on already-connected socket
+  if (socket && socket.connected) socket.emit('join', { username: myName, userId: myId });
 }
 
 function activateChat() {
@@ -1125,7 +1122,6 @@ function activateChat() {
   document.getElementById('logout-btn').style.display = 'flex';
   document.getElementById('users-btn').style.display = 'flex';
   document.getElementById('my-name-hdr').textContent = myName;
-  document.getElementById('msgs-placeholder').style.display = 'none';
   document.getElementById('ap-name').textContent = myName;
   setupInput();
   document.getElementById('inp').focus();
@@ -1134,7 +1130,11 @@ function activateChat() {
 /* ── Socket ── */
 function connectSocket() {
   socket = io();
-  socket.on('connect', () => socket.emit('join', { username: myName, userId: myId }));
+  socket.on('connect', () => {
+    // Only emit join if we already have a username (returning user)
+    // New users will emit join from doJoin() after entering their name
+    if (myName && myId) socket.emit('join', { username: myName, userId: myId });
+  });
 
   socket.on('joined', ({ userId, role, color }) => {
     myId=userId; myRole=role; myColor=color;
@@ -1153,6 +1153,9 @@ function connectSocket() {
     messages = msgs;
     const box = document.getElementById('msgs');
     box.innerHTML = '';
+    // Hide placeholder — messages are now visible
+    const ph = document.getElementById('msgs-placeholder');
+    if (ph) ph.remove();
     msgs.forEach((m,i) => addMsg(m, false, msgs[i-1]));
     requestAnimationFrame(() => scrollBot(true));
     updateMsgCount();
@@ -1248,11 +1251,8 @@ function addMsg(msg, animate, prev) {
     return;
   }
 
-  const grouped = prev && prev.type!=='system' &&
-    prev.userId===msg.userId && prev.role===msg.role &&
-    !msg.replyTo && (msg.ts - prev.ts) < 5*60*1000;
-
-  div.className=`msg${msg.type==='whisper'?' wsp':''}${grouped?' grouped':''}`;
+  // Always show avatar + username on every message (no grouping)
+  div.className=`msg${msg.type==='whisper'?' wsp':''}`;
 
   const ts = new Date(msg.ts).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
   const init = (msg.username||'?')[0].toUpperCase();
@@ -1290,7 +1290,6 @@ function addMsg(msg, animate, prev) {
     </div>` : '';
 
   div.innerHTML=`
-    <div class="mts-hover">${ts}</div>
     <div class="mavt" style="background:${col}">${init}</div>
     <div class="mbody">
       <div class="mmeta">
