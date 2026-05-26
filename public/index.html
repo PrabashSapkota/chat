@@ -318,9 +318,9 @@ a:hover { text-decoration:underline; }
 
 /* Avatar */
 .mavt {
-  width:32px; height:32px; min-width:32px; border-radius:8px;
+  width:36px; height:36px; min-width:36px; border-radius:50%;
   display:flex; align-items:center; justify-content:center;
-  font-size:12px; font-weight:700; margin-top:1px; margin-right:12px;
+  font-size:14px; font-weight:700; margin-top:0px; margin-right:12px;
   color:#fff !important; flex-shrink:0;
 }
 
@@ -330,9 +330,9 @@ a:hover { text-decoration:underline; }
 .msg.grouped .mts-hover { display:flex; }
 .msg.grouped .mmeta { display:none; }
 
-.mbody { flex:1; min-width:0; }
+.mbody { display:flex; flex-direction:column; gap:2px; }
 
-.mmeta { display:flex; align-items:baseline; gap:7px; margin-bottom:2px; }
+.mmeta { display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
 .mname { font-size:14px; font-weight:600; cursor:pointer; letter-spacing:-.1px; }
 .mname:hover { text-decoration:underline; }
 
@@ -343,7 +343,8 @@ a:hover { text-decoration:underline; }
 .ba { background:rgba(249,115,22,.12); color:var(--orange); border:1px solid rgba(249,115,22,.2); }
 .bm { background:rgba(62,207,142,.1); color:var(--mod); border:1px solid rgba(62,207,142,.18); }
 
-.mtime { font-size:11px; color:var(--t4); font-variant-numeric:tabular-nums; }
+.mtime { display:none; font-size:10px; color:var(--t4); font-variant-numeric:tabular-nums; }
+.msg:hover .mtime { display:inline; }
 
 /* Hover timestamp (grouped msgs) */
 .mts-hover {
