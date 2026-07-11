@@ -26,7 +26,7 @@ const state = {
   lastMsgContent:{},
   burstHistory:  {},
   userIps:       {},
-  maxMessages:   200,
+  maxMessages:   50,
 };
 
 /* ─── File-based Persistence ─────────────────────────────────────────────── */
@@ -47,7 +47,7 @@ function loadData() {
 function saveData() {
   try {
     const data = {
-      messages: state.messages.slice(-500),
+      messages: state.messages.slice(-50),
       bannedIds: Array.from(state.bannedIds),
       polls: state.polls,
       pinnedMsgId: state.pinnedMsgId,
@@ -104,9 +104,28 @@ function push(msg) {
   saveData();
 }
 function broadcastUsers() {
-  io.emit('users_update', Object.values(state.users).map(u => ({
-    id: u.id, username: u.username, role: u.role, color: u.color, muted: u.muted
-  })));
+  const allUsers = Object.values(state.users);
+  
+  // Prioritize admins, mods, and muted users (they must always be sent)
+  const priorityUsers = allUsers.filter(u => ['admin', 'mod'].includes(u.role) || u.muted);
+  
+  // Limit regular unmuted users to 50
+  const regularUsers = allUsers.filter(u => u.role === 'user' && !u.muted);
+  const limitedRegular = regularUsers.slice(0, 50);
+  
+  const uniqueUsersMap = new Map();
+  [...priorityUsers, ...limitedRegular].forEach(u => {
+    if (!uniqueUsersMap.has(u.id)) {
+      uniqueUsersMap.set(u.id, {
+        id: u.id, username: u.username, role: u.role, color: u.color, muted: u.muted
+      });
+    }
+  });
+
+  io.emit('users_update', {
+    list: Array.from(uniqueUsersMap.values()),
+    totalCount: new Set(allUsers.map(u => u.id)).size
+  });
 }
 function broadcastSettings() {
   io.emit('chat_settings', {
@@ -159,12 +178,32 @@ io.on('connection', socket => {
       socket.disconnect();
       return;
     }
+
+    let finalUsername = username;
+    const isNameTaken = (name) => Object.values(state.users).some(u => u.id !== userId && u.username.toLowerCase() === name.toLowerCase());
+    
+    if (isNameTaken(finalUsername)) {
+      const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
+      let suffix = '';
+      for (let i = 0; i < 3; i++) {
+        suffix += chars.charAt(Math.floor(Math.random() * chars.length));
+      }
+      finalUsername = `${username}_${suffix}`;
+      while (isNameTaken(finalUsername)) {
+        suffix = '';
+        for (let i = 0; i < 3; i++) {
+          suffix += chars.charAt(Math.floor(Math.random() * chars.length));
+        }
+        finalUsername = `${username}_${suffix}`;
+      }
+    }
+
     const prev  = Object.values(state.users).find(u => u.id === userId);
     const color = prev?.color || randColor(userId);
     const role  = prev?.role  || 'user';
-    state.users[socket.id] = { id: userId, username, role, color, muted: false, socketId: socket.id };
-    socket.emit('joined', { userId, role, color });
-    socket.emit('chat_history',  state.messages.slice(-100));
+    state.users[socket.id] = { id: userId, username: finalUsername, role, color, muted: false, socketId: socket.id };
+    socket.emit('joined', { userId, role, color, username: finalUsername });
+    socket.emit('chat_history',  state.messages.slice(-50));
     socket.emit('polls_update',  state.polls);
     socket.emit('chat_settings', { slowMode: state.slowMode, chatLocked: state.chatLocked, pinnedMsgId: state.pinnedMsgId });
     broadcastUsers();
@@ -275,6 +314,74 @@ io.on('connection', socket => {
     if (msg) { msg.deleted = true; io.emit('message_deleted', id); }
   });
 
+  /* DELETE ALL BY USER */
+  socket.on('delete_all_by_user', targetUserId => {
+    const user = state.users[socket.id];
+    if (!user || !['admin','mod'].includes(user.role)) return;
+    
+    let deletedCount = 0;
+    state.messages.forEach(msg => {
+      if (msg.userId === targetUserId && !msg.deleted) {
+        msg.deleted = true;
+        deletedCount++;
+      }
+    });
+    
+    if (deletedCount > 0) {
+      saveData();
+      io.emit('refresh_chat', state.messages.slice(-50));
+      const m = sysMsg(`🗑️ Deleted all messages by user ${targetUserId}`);
+      push(m);
+      io.emit('new_message', m);
+    }
+  });
+
+  /* BAN USER */
+  socket.on('ban_user', targetUserId => {
+    const user = state.users[socket.id];
+    if (!user || !['admin','mod'].includes(user.role)) return;
+    
+    const targetUser = Object.values(state.users).find(u => u.id === targetUserId);
+    if (!targetUser) return;
+    if (targetUser.role === 'admin') return; // Cannot ban admins
+    
+    state.bannedIds.add(targetUserId);
+    saveData();
+    
+    // Disconnect all sockets of the banned user
+    for (const [sid, u] of Object.entries(state.users)) {
+      if (u.id === targetUserId) {
+        const s = io.sockets.sockets.get(sid);
+        if (s) {
+          s.emit('banned');
+          s.disconnect();
+        }
+        delete state.users[sid];
+      }
+    }
+    
+    const m = sysMsg(`🔨 ${targetUser.username} has been banned by ${user.username}.`);
+    push(m);
+    io.emit('new_message', m);
+    broadcastUsers();
+  });
+
+  /* UNBAN USER */
+  socket.on('unban_user', targetUserId => {
+    const user = state.users[socket.id];
+    if (!user || !['admin','mod'].includes(user.role)) return;
+    
+    if (state.bannedIds.has(targetUserId)) {
+      state.bannedIds.delete(targetUserId);
+      saveData();
+      const m = sysMsg(`🔊 User ID ${targetUserId} has been unbanned by ${user.username}.`);
+      push(m);
+      io.emit('new_message', m);
+    } else {
+      socket.emit('error_msg', 'User ID not found in ban list.');
+    }
+  });
+
   /* PIN / UNPIN MESSAGE */
   socket.on('pin_message', id => {
     const user = state.users[socket.id];
@@ -379,6 +486,14 @@ io.on('connection', socket => {
     const user = state.users[socket.id];
     if (user) {
       delete state.users[socket.id];
+      // Clean up tracking maps if user has no more active sessions
+      const stillConnected = Object.values(state.users).some(u => u.id === user.id);
+      if (!stillConnected) {
+        delete state.lastMsgTime[user.id];
+        delete state.lastMsgContent[user.id];
+        delete state.burstHistory[user.id];
+        delete state.userIps[user.id];
+      }
       broadcastUsers();
     }
   });
