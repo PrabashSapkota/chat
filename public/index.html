@@ -987,6 +987,12 @@ code {
       <button class="abtn ab-g" onclick="showPollModal();hideAdminPanel()">📊 Create Poll</button>
       <button class="abtn ab-p" onclick="exportChat()">📥 Export Chat</button>
     </div>
+    <div class="ap-sec">Ban Management</div>
+    <div class="ap-row">
+      <label>Unban User ID</label>
+      <input type="text" id="unban-inp" placeholder="Enter User ID"/>
+      <button class="abtn ab-g" style="padding:7px 12px;white-space:nowrap" onclick="applyUnban()">Unban</button>
+    </div>
     <div class="ap-sec">Slow Mode</div>
     <div class="ap-row">
       <label>Delay (seconds)</label>
@@ -1212,8 +1218,13 @@ function connectSocket() {
   socket = io();
   socket.on('connect', () => socket.emit('join', { username: myName, userId: myId }));
 
-  socket.on('joined', ({ userId, role, color }) => {
+  socket.on('joined', ({ userId, role, color, username }) => {
     myId=userId; myRole=role; myColor=color;
+    if (username) {
+      myName = username;
+      localStorage.setItem('lc_name', username);
+      document.getElementById('my-name-hdr').textContent = username;
+    }
     localStorage.setItem('lc_uid', userId);
     setMyAvatar(color); updatePrivUI();
   });
@@ -1236,7 +1247,13 @@ function connectSocket() {
   socket.on('new_message', msg => {
     const prev = messages[messages.length-1];
     messages.push(msg);
-    if (messages.length > 500) messages.shift();
+    if (messages.length > 50) {
+      const oldest = messages.shift();
+      if (oldest) {
+        const el = document.querySelector(`[data-mid="${oldest.id}"]`);
+        if (el) el.remove();
+      }
+    }
     addMsg(msg, true, prev);
     updateMsgCount();
   });
@@ -1256,11 +1273,19 @@ function connectSocket() {
     if(el) renderReacts(el.querySelector('.mreacts'), messageId, reactions);
   });
 
-  socket.on('users_update', list => {
-    users = list; renderUsers();
-    const n = list.length;
-    document.getElementById('online-cnt').textContent = `${n} online`;
-    document.getElementById('up-cnt').textContent = n;
+  socket.on('users_update', data => {
+    if (data && data.list) {
+      users = data.list;
+      const n = data.totalCount;
+      document.getElementById('online-cnt').textContent = `${n} online`;
+      document.getElementById('up-cnt').textContent = n;
+    } else {
+      users = data || [];
+      const n = users.length;
+      document.getElementById('online-cnt').textContent = `${n} online`;
+      document.getElementById('up-cnt').textContent = n;
+    }
+    renderUsers();
   });
 
   socket.on('polls_update', list => { polls=list; renderPolls(); });
@@ -1589,10 +1614,10 @@ function renderUsers() {
   const mods=users.filter(u=>u.role==='mod');
   const regular=users.filter(u=>u.role==='user');
 
-  const renderGroup=(label,arr)=>{
+  const renderGroup=(label,arr,totalCount)=>{
     if(!arr.length) return;
     const sec=document.createElement('div');
-    sec.className='up-sec'; sec.textContent=`${label} — ${arr.length}`;
+    sec.className='up-sec'; sec.textContent=`${label} — ${totalCount !== undefined ? totalCount : arr.length}`;
     list.appendChild(sec);
     arr.forEach(u=>{
       const row=document.createElement('div'); row.className='urow';
@@ -1604,20 +1629,39 @@ function renderUsers() {
   };
   renderGroup('Admins',admins);
   renderGroup('Moderators',mods);
-  renderGroup('Members',regular);
+  
+  const totalOnline = parseInt(document.getElementById('up-cnt').textContent) || users.length;
+  const regularCount = Math.max(0, totalOnline - admins.length - mods.length);
+  renderGroup('Members',regular,regularCount);
 }
 
 /* ── Context menu ── */
 function openCtxByUid(uid,evt) {
   evt.stopPropagation();
   if(uid===myId) return;
-  const u=users.find(u=>u.id===uid); if(!u) return;
+  
+  let u = users.find(u=>u.id===uid);
+  if (!u) {
+    const msg = messages.find(m => m.userId === uid);
+    if (msg) {
+      u = {
+        id: uid,
+        username: msg.username,
+        role: msg.role || 'user',
+        color: msg.color || '#4d7cfe',
+        muted: false
+      };
+    }
+  }
+  if (!u) return;
+
   const canMod=['admin','mod'].includes(myRole);
   let html=`<div class="ci" onclick="doWhisper('${uid}')">💌 Whisper</div>`;
   if(canMod){
     html+=`<div class="cdiv"></div>`;
     html+=`<div class="ci warn" onclick="socket.emit('mute_user',{targetUserId:'${uid}',muted:${!u.muted}});closeCtx()">${u.muted?'🔊 Unmute':'🔇 Mute'}</div>`;
     html+=`<div class="ci danger" onclick="doDeleteAll('${uid}','${esc(u.username)}')">🗑 Delete All Messages</div>`;
+    html+=`<div class="ci danger" onclick="doBanUser('${uid}','${esc(u.username)}')">🔨 Ban User</div>`;
     html+=`<div class="cdiv"></div>`;
     html+=`<div class="ci ok" onclick="socket.emit('set_role',{targetUserId:'${uid}',role:'mod'});closeCtx()">⭐ Make Mod</div>`;
     html+=`<div class="ci" onclick="socket.emit('set_role',{targetUserId:'${uid}',role:'user'});closeCtx()">👤 Remove Mod</div>`;
@@ -1629,8 +1673,18 @@ function openCtxByUid(uid,evt) {
   ctx.style.left=x+'px'; ctx.style.top=y+'px'; ctx.style.display='block';
 }
 function closeCtx(){document.getElementById('ctx').style.display='none';}
-function doWhisper(uid){closeCtx();const u=users.find(u=>u.id===uid);const t=prompt(`Whisper to ${u?.username||uid}:`);if(t?.trim())socket.emit('whisper',{targetUserId:uid,text:t.trim()});}
+function doWhisper(uid){
+  closeCtx();
+  let u=users.find(u=>u.id===uid);
+  if (!u) {
+    const msg = messages.find(m => m.userId === uid);
+    if (msg) u = { username: msg.username };
+  }
+  const t=prompt(`Whisper to ${u?.username||uid}:`);
+  if(t?.trim())socket.emit('whisper',{targetUserId:uid,text:t.trim()});
+}
 function doDeleteAll(uid,name){closeCtx();if(confirm(`Delete ALL messages by ${name}?`))socket.emit('delete_all_by_user',uid);}
+function doBanUser(uid,name){closeCtx();if(confirm(`Ban user ${name}? This will disconnect them and prevent reconnects.`))socket.emit('ban_user',uid);}
 
 /* ── Polls ── */
 function renderPolls() {
@@ -1692,6 +1746,7 @@ function showAdminPanel(){document.getElementById('admin-panel').classList.add('
 function hideAdminPanel(){document.getElementById('admin-panel').classList.remove('on');}
 function clearChat(){if(!confirm('Clear ALL messages?')) return; socket.emit('clear_chat');hideAdminPanel();}
 function applySlowMode(){const v=parseInt(document.getElementById('slow-inp').value)||0;socket.emit('set_slow_mode',v);notify(`Slow mode: ${v>0?v+'s':'off'}`,'ok');}
+function applyUnban(){const val=document.getElementById('unban-inp').value.trim();if(!val)return notify('Enter a user ID','err');socket.emit('unban_user',val);document.getElementById('unban-inp').value='';notify(`Unban request sent for ${val}`,'ok');}
 function exportChat(){
   const txt=messages.filter(m=>!m.deleted&&m.type!=='system').map(m=>`[${new Date(m.ts).toLocaleString()}] ${m.username}: ${m.text}`).join('\n');
   const a=document.createElement('a');
